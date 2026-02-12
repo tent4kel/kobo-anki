@@ -533,6 +533,7 @@ func readMisses(path string) map[string]bool {
 }
 
 func appendMisses(path string, words []string) {
+	os.MkdirAll(filepath.Dir(path), 0755)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("Failed to write misses: %v", err)
@@ -579,6 +580,9 @@ func translateAPI(word, from, to string) (string, error) {
 // --- CSV export ---
 
 func exportCSV(path string, existingRows [][]string, newTranslations []Translation) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
