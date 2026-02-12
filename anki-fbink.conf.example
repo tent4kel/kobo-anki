@@ -1,0 +1,16 @@
+# FBInk display configuration
+font_dir=/mnt/onboard/fonts/extra-kobo
+font_front=KF_Newsreader-Regular.ttf
+font_back=KF_Newsreader-Italic.ttf
+font_menu=KF_Newsreader-Regular.ttf
+
+# Font sizes (in points for TrueType)
+size_title=24
+size_card=28
+size_menu=16
+
+# Display
+darkmode=false
+
+# Touch cooldown in milliseconds
+touch_cooldown=300

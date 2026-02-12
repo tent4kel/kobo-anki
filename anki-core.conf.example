@@ -1,0 +1,6 @@
+# Shared core configuration (used by both fbink and server binaries)
+data_dir=words
+reverse=false
+request_retention=0.9
+maximum_interval=36500
+enable_short_term=false

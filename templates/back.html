@@ -1,0 +1,47 @@
+{{define "back"}}
+<html>
+<head>
+<title>Anki</title>
+<style>
+html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
+a { text-decoration:none; color:#000; }
+</style>
+</head>
+<body>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eee;">
+<tr>
+<td height="60" align="center">
+<a href="/" style="display:block;height:60px;line-height:60px;">
+<font size="4">[decks]</font>
+</a>
+</td>
+</tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="position:absolute;top:60px;bottom:120px;left:0;right:0;">
+<tr>
+<td align="center" valign="middle">
+<font size="5" color="#666666">{{.Card.Front}}</font>
+<br><br>
+<font size="7"><b>{{.Card.Back}}</b></font>
+</td>
+</tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="position:fixed;bottom:0;left:0;">
+<tr>
+<td width="25%" height="120" align="center" style="background-color:#ddd;">
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=1&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Again</b></font></a>
+</td>
+<td width="25%" height="120" align="center" style="background-color:#ccc;">
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=2&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Hard</b></font></a>
+</td>
+<td width="25%" height="120" align="center" style="background-color:#bbb;">
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=3&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Good</b></font></a>
+</td>
+<td width="25%" height="120" align="center" style="background-color:#aaa;">
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=4&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Easy</b></font></a>
+</td>
+</tr>
+</table>
+</body>
+</html>
+{{end}}

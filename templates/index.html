@@ -1,0 +1,43 @@
+{{define "index"}}
+<html>
+<head>
+<title>Kobo Anki</title>
+<style>
+html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
+a { text-decoration:none; color:#000; }
+</style>
+</head>
+<body>
+<div style="background-color:#ddd;height:60px;">
+<a href="/quit" style="display:block;height:60px;line-height:60px;text-align:center;">
+<font size="4">[exit]</font>
+</a>
+</div>
+<div style="text-align:center;padding:20px 0;">
+<font size="6"><b>Kobo Anki</b></font>
+</div>
+{{if .}}
+<div style="overflow-y:auto;max-height:calc(100vh - 160px);-webkit-overflow-scrolling:touch;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+{{range .}}
+<tr>
+<td height="80" style="background-color:#eee;border-bottom:2px solid #ccc;">
+<a href="/study?deck={{.Name}}" style="display:block;width:100%;height:80px;padding:10px;">
+<font size="5"><b>{{.Name}}</b></font><br>
+<font size="4" color="#666666">{{.Due}} due</font>
+</a>
+</td>
+</tr>
+{{end}}
+</table>
+</div>
+{{else}}
+<div style="text-align:center;padding:40px;">
+<font size="4">No decks found.</font>
+<br><br>
+<font size="3">Add .csv files to the data directory.</font>
+</div>
+{{end}}
+</body>
+</html>
+{{end}}

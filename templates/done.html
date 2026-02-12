@@ -1,0 +1,26 @@
+{{define "done"}}
+<html>
+<head>
+<title>Anki</title>
+<style>
+html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
+a { text-decoration:none; color:#000; }
+</style>
+</head>
+<body>
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td align="center" valign="middle">
+<font size="6"><b>All done!</b></font>
+<br><br>
+<font size="4">No cards due for review.</font>
+<br><br><br>
+<a href="/stats?deck={{.}}"><font size="4">[view stats]</font></a>
+<br><br>
+<a href="/"><font size="4">[back to decks]</font></a>
+</td>
+</tr>
+</table>
+</body>
+</html>
+{{end}}

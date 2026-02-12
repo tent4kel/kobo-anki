@@ -1,0 +1,56 @@
+# kobo-vocab configuration
+# Dictionary location - can be relative or absolute
+# Examples:
+#   dict_dir=dict                             (bundled with app)
+#   dict_dir=/mnt/onboard/.kobo/custom-dict   (Kobo custom dicts)
+#   dict_dir=/mnt/onboard/.kobo/dict          (Kobo built-in dicts)
+dict_dir=dict
+db=/mnt/onboard/.kobo/KoboReader.sqlite
+out=words
+
+[nl]
+reduce_double=true
+strip=en
+strip=s
+strip=e
+strip=ft>ven
+strip=t>den
+strip=t>ten
+strip=t>en
+strip=t
+strip=je
+strip=tje
+strip=pje
+strip=ende
+strip=ende>en
+prefix_strip=ge
+
+[de]
+reduce_double=true
+strip=en
+strip=e
+strip=er
+strip=es
+strip=em
+strip=n
+strip=s
+strip=t
+strip=st
+strip=t>en
+strip=ung
+strip=ung>en
+prefix_strip=ge
+
+[fr]
+strip=s
+strip=e
+strip=es
+strip=ent
+strip=ent>er
+strip=ait>er
+strip=aient>er
+strip=ant>er
+strip=é>er
+strip=ée>er
+strip=és>er
+strip=ées>er

@@ -1,0 +1,32 @@
+# Compiled binaries
+bin/
+kobo-anki
+kobo-anki-fbink
+kobo-anki-server
+kobo-vocab/kobo-vocab
+
+# Deployment zips
+*.zip
+
+# Dictionaries (large, user-specific)
+dict/
+kobo-vocab/dict/
+kobo-vocab/kobodict/
+
+# User data
+words/
+*.csv
+*.sqlite
+*.txt
+
+# Logs
+*.log
+
+# Config files (examples are tracked instead)
+anki-core.conf
+anki-fbink.conf
+anki-mywords.conf
+kobo-vocab/vocab.conf
+
+# Old setup doc (replaced by README.md)
+SETUP.txt
