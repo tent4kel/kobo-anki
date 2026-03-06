@@ -380,6 +380,8 @@ func findFbink() string {
 	for _, p := range []string{
 		"./bin/fbink",
 		"/mnt/onboard/.adds/nm/fbink",
+		"/mnt/onboard/.adds/koreader/fbink",
+		"/usr/local/Kobo/fbink",
 		"/usr/local/bin/fbink",
 		"/usr/bin/fbink",
 	} {
