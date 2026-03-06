@@ -1,5 +1,5 @@
 #!/bin/sh
-# Kobo Anki launcher — kills Nickel, feeds watchdog, restarts Nickel on exit.
+# Kobo Anki launcher — kills Nickel, feeds watchdog, reboots on exit.
 # Designed to be launched from NickelMenu.
 cd "$(dirname "$0")"
 LOG=kobo-anki.log
@@ -32,25 +32,12 @@ stop_watchdog() {
     fi
 }
 
-# --- Nickel restart ---
-restart_nickel() {
-    echo "Restarting Nickel..." >>$LOG
-    [ ! -e /tmp/nickel-hardware-status ] && mkfifo /tmp/nickel-hardware-status 2>/dev/null
-    export LD_LIBRARY_PATH=/usr/local/Kobo
-    /usr/local/Kobo/hindenburg &
-    /usr/local/Kobo/nickel -platform kobo -skipFontLoad &
-    # Give Nickel time to start and reclaim watchdog
-    sleep 5
-}
-
 # --- Cleanup: runs on any exit (normal, crash, signal) ---
 cleanup() {
-    echo "Cleanup at $(date)" >>$LOG
-    ./bin/fbink -c -f 2>/dev/null
-    restart_nickel
+    echo "Cleanup at $(date), rebooting..." >>$LOG
     stop_watchdog
     sync
-    echo "=== done $(date) ===" >>$LOG
+    reboot
 }
 trap cleanup EXIT INT TERM
 
