@@ -27,6 +27,10 @@ anki-core.conf
 anki-fbink.conf
 anki-mywords.conf
 kobo-vocab/vocab.conf
+deploy.conf
 
 # Old setup doc (replaced by README.md)
 SETUP.txt
+
+# API credentials
+APIs/

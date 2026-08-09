@@ -1,2 +1,8 @@
 github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1 h1:zKBIfL5ZmbJfSe4nXABkazrSw7BQufi5ghXTZWXsvq8=
 github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1/go.mod h1:zTtQIk3kOO9kweg5zJAgbdwBXR2HBPsDN0k6AxmTpzY=
+github.com/yuin/goldmark v1.8.5 h1:r6N5afV5qj/5S4UTch8agZHJ8UxNCMwX7WjkkJam2NA=
+github.com/yuin/goldmark v1.8.5/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
+golang.org/x/image v0.44.0 h1:+tDekMZED9+LrtB3G5xzRggpVh9CARjZqROla3R3R+I=
+golang.org/x/image v0.44.0/go.mod h1:V8K3KE9KKKE+pLpQDOeN18w9oacNSvy1tDOirTu4xtY=
+golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
+golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=

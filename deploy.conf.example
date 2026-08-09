@@ -1,0 +1,7 @@
+# Copy to deploy.conf (gitignored) to avoid typing connection details every
+# time you run ./deploy-ftp.sh. Command-line args, if given, still win over
+# these.
+KOBO_HOST=192.168.1.116
+KOBO_PORT=1021
+KOBO_USER=root
+KOBO_FOLDER=kobo-anki-beta

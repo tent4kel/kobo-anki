@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"html/template"
 	"kobo-anki/core"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/open-spaced-repetition/go-fsrs/v3"
+	"github.com/yuin/goldmark"
 )
 
 var (
@@ -23,10 +25,36 @@ var (
 )
 
 type studyData struct {
-	Card    *core.Card
-	Deck    string
-	Key     string // original card.Front for URL lookups
-	Reverse bool
+	Card      *core.Card
+	FrontHTML template.HTML
+	BackHTML  template.HTML
+	Deck      string
+	Key       string // original card.Front for URL lookups
+	Reverse   bool
+}
+
+// renderMD converts a card field (which may be Markdown emitted by
+// kobo-vocab, or a plain headword) to HTML. Converting plain text through
+// goldmark is a safe no-op, so every field is treated as "may contain
+// Markdown" uniformly rather than special-cased by Front/Back - reverse
+// mode can put either physical CSV column in either display slot.
+func renderMD(s string) template.HTML {
+	var buf bytes.Buffer
+	if err := goldmark.Convert([]byte(s), &buf); err != nil {
+		return template.HTML(template.HTMLEscapeString(s))
+	}
+	return template.HTML(buf.String())
+}
+
+func newStudyData(display *core.Card, deck, key string, reverse bool) studyData {
+	return studyData{
+		Card:      display,
+		FrontHTML: renderMD(display.Front),
+		BackHTML:  renderMD(display.Back),
+		Deck:      deck,
+		Key:       key,
+		Reverse:   reverse,
+	}
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +111,7 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	if reverse {
 		display.Front, display.Back = display.Back, display.Front
 	}
-	tmpl.ExecuteTemplate(w, "front", studyData{&display, deck, card.Front, reverse})
+	tmpl.ExecuteTemplate(w, "front", newStudyData(&display, deck, card.Front, reverse))
 }
 
 func backHandler(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +137,7 @@ func backHandler(w http.ResponseWriter, r *http.Request) {
 	if reverse {
 		display.Front, display.Back = display.Back, display.Front
 	}
-	tmpl.ExecuteTemplate(w, "back", studyData{&display, deck, card.Front, reverse})
+	tmpl.ExecuteTemplate(w, "back", newStudyData(&display, deck, card.Front, reverse))
 }
 
 func rateHandler(w http.ResponseWriter, r *http.Request) {

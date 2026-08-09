@@ -1,0 +1,85 @@
+#!/bin/sh
+# Build the ARM binaries and push a full kobo-anki install to a Kobo over
+# FTP, file by file (no remote shell/tar-extraction needed - just plain
+# FTP STOR, which is all stock Kobo FTP servers support).
+#
+# Usage:
+#   ./deploy-ftp.sh <kobo-ip> [target-folder]
+#   ./deploy-ftp.sh                              (reads deploy.conf instead)
+#
+# target-folder is the directory name under .adds/ on the device, e.g.
+# "kobo-anki" (production) or "kobo-anki-beta" (side-by-side test install).
+# Defaults to "kobo-anki".
+#
+# Connection details can also be set in deploy.conf (gitignored, see
+# deploy.conf.example) instead of passing them on the command line:
+#   KOBO_HOST=192.168.1.116
+#   KOBO_PORT=1021
+#   KOBO_USER=root
+#   KOBO_FOLDER=kobo-anki-beta
+#
+# Never touches words/ (your live flashcard progress) or logs on-device -
+# only the files that ship in the tarball (bin/, dict/, APIs/, templates/,
+# start*.sh, *.conf, french.csv, cacert.pem) get uploaded/overwritten.
+set -e
+cd "$(dirname "$0")"
+
+if [ -f deploy.conf ]; then
+    . ./deploy.conf
+fi
+
+KOBO_HOST="${1:-${KOBO_HOST:-}}"
+KOBO_FOLDER="${2:-${KOBO_FOLDER:-kobo-anki}}"
+KOBO_PORT="${KOBO_PORT:-1021}"
+KOBO_USER="${KOBO_USER:-root}"
+
+if [ -z "$KOBO_HOST" ]; then
+    echo "Usage: $0 <kobo-ip> [target-folder]"
+    echo "   or: create deploy.conf (see deploy.conf.example) and run with no args"
+    exit 1
+fi
+
+echo "Building ARM binaries..."
+sh build.sh
+
+echo ""
+echo "Deploying to ftp://$KOBO_USER@$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER/kobo-anki/"
+
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+
+mkdir -p "$STAGE/kobo-anki/bin" "$STAGE/kobo-anki/dict" "$STAGE/kobo-anki/templates"
+cp bin/kobo-anki-fbink bin/kobo-anki-server bin/kobo-vocab "$STAGE/kobo-anki/bin/"
+# fbink itself is only uploaded if you already have one built/placed in
+# bin/ locally - it needs an image-support-enabled build (see README), and
+# this script won't silently overwrite a working device copy with nothing.
+[ -f bin/fbink ] && cp bin/fbink "$STAGE/kobo-anki/bin/"
+cp start.sh start-debug.sh start-fbink.sh start-server.sh "$STAGE/kobo-anki/"
+cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/kobo-anki/"
+# CA bundle for the network providers' TLS verification - some Kobo
+# firmware ships with no system CA store at all (see ca_cert in
+# anki-mywords.conf.example), so this is deployed unconditionally.
+cp cacert.pem "$STAGE/kobo-anki/"
+cp templates/*.html "$STAGE/kobo-anki/templates/"
+[ -d dict ] && cp dict/*.zip "$STAGE/kobo-anki/dict/" 2>/dev/null || true
+[ -f french.csv ] && cp french.csv "$STAGE/kobo-anki/"
+# APIs/ (provider credentials, e.g. lexicala.json) - gitignored and only
+# deployed if you've actually populated it; providers=lexicala on-device
+# needs this to work at all.
+if [ -d APIs ] && ls APIs/*.json >/dev/null 2>&1; then
+    mkdir -p "$STAGE/kobo-anki/APIs"
+    cp APIs/*.json "$STAGE/kobo-anki/APIs/"
+fi
+
+FTP_BASE="ftp://$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER"
+cd "$STAGE"
+find kobo-anki -type f | while read -r f; do
+    echo "  $f"
+    curl -sf --max-time 30 -T "$f" --ftp-create-dirs "$FTP_BASE/$f" --user "$KOBO_USER:" || {
+        echo "FAILED: $f" >&2
+        exit 1
+    }
+done
+
+echo ""
+echo "Done. Restart the app on-device (or re-run its NickelMenu entry) to pick up the new build."

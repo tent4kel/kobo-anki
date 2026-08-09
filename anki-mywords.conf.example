@@ -8,7 +8,125 @@ dict_dir=dict
 db=/mnt/onboard/.kobo/KoboReader.sqlite
 out=words
 
+# Automatically run kobo-vocab in the background at every startup.
+# Off by default — enable once you're happy with your dictionary setup,
+# since it re-scans your Kobo's vocabulary list and dictionaries on boot.
+auto_parse=false
+
+# Definition length controls, for dictionaries with rich/nested entries
+# (multiple senses, example sentences, etc.):
+#   max_senses=1   how many senses (<li> entries) to include per word
+#   max_depth=1    how many direct sub-blocks to keep within each sense —
+#                  the first is always the core gloss; a second is usually
+#                  an example-sentence block, so max_depth=1 drops examples
+#   max_chars=150  hard cap on definition length as a safety net
+max_senses=1
+max_depth=1
+max_chars=150
+
+# Content providers to try, in order, for each word - the first one that
+# finds something wins. Built-in providers:
+#   dict       local dicthtml-*.zip files (see dict_dir above). Free,
+#              instant, offline - keep this first.
+#   lexicala   online dictionary API (lexicala.com via RapidAPI). Needs
+#              credentials in APIs/lexicala.json (base_url + token, see
+#              APIs/ directory - gitignored, never committed) and is
+#              limited to ~50 calls/day, so it's meant as a fallback for
+#              words the local dict misses, not a primary source.
+#   mymemory   free machine-translation API, no credentials needed. Same
+#              role as the old api_fallback=true setting.
+#   chatgpt    LLM-generated card: headword (dictionary form) + a few
+#              alternative meanings + one example sentence, on BOTH the
+#              front (source language) and back (target language, a
+#              translation of the same example) - see chatgpt_* below.
+#              Needs credentials in APIs/chatgpt.json. Works with any
+#              OpenAI-compatible Chat Completions endpoint, not just
+#              OpenAI itself - see chatgpt_provider.go for details.
+# Can also be set per-language below, overriding this default. Uncomment
+# to try the online providers as a fallback once your dicts are set up:
+# providers=dict,lexicala,mymemory,chatgpt
+providers=dict
+
+# CA bundle used for every network provider's TLS verification, appended to
+# whatever the OS's own trust store provides (if any). Needed because some
+# Kobo firmware ships with NO system CA store at all - on a device like
+# that, every HTTPS request fails identically ("x509: certificate signed by
+# unknown authority"), regardless of which provider or how valid its real
+# certificate is. cacert.pem (repo root, a standard CA bundle - not a
+# secret, safe to ship/commit) covers that case; only relevant if lexicala/
+# mymemory/chatgpt are in providers= above, since dict never touches the
+# network.
+ca_cert=cacert.pem
+
+# Only read if "lexicala" is in providers= above. Relative paths resolve
+# against this config file's directory, same as dict_dir/db/out.
+lexicala_conf=APIs/lexicala.json
+
+# Only read if "chatgpt" is in providers= above. chatgpt_conf is the
+# credentials file (base_url + token - see APIs/ directory, gitignored);
+# everything else here is the actual "variables to build the request":
+#   chatgpt_model             any OpenAI-compatible model id
+#   chatgpt_temperature       0.0-2.0, lower = more deterministic/factual
+#   chatgpt_max_tokens        hard cap on the completion length
+#   chatgpt_max_alternatives  how many alternative meanings/translations
+#                              to keep per card face (like Lexicala's
+#                              top-N translations, applied to both faces)
+chatgpt_conf=APIs/chatgpt.json
+chatgpt_model=gpt-4o-mini
+chatgpt_temperature=0.1
+chatgpt_max_tokens=400
+chatgpt_max_alternatives=3
+
+# How the "themed" card faces (headword + alternatives + example) are laid
+# out - shared by dict (when dict_examples=true), lexicala, and chatgpt, so
+# it applies uniformly across every provider that builds one. Global only,
+# no per-[lang] override (lexicala/chatgpt are built once and shared across
+# every language pair in a run, so a per-language override would only ever
+# take effect for whichever language happened to build them first).
+#
+# Placeholders: {head} {alts} {ex}. Wrap a chunk in [...] to drop it
+# entirely - not just leave it blank - when every placeholder inside it is
+# empty, e.g. "[, {alts}]" disappears rather than leaving a dangling ", "
+# when a word has no alternatives. No nesting, no escaping. Keep separating
+# punctuation/spaces INSIDE the brackets they belong to, not floating
+# between two bracketed groups, or a dropped middle group can leave a
+# double space behind (e.g. write "{head}[, {alts}][ *{ex}*]", not
+# "{head} [{alts}] [{ex}]").
+#
+# The default below reproduces the original hardcoded style exactly:
+card_format=[**{head}**][, {alts}][ *{ex}*]
+
 [nl]
+# Any of max_senses/max_depth/max_chars can also be set per language,
+# overriding the global defaults above for words from this language only
+# (e.g. a language whose dict glosses run longer might want a higher
+# max_chars here). Uncomment to try:
+# max_senses=2
+# max_chars=200
+#
+# translation_tag=b: for dictionaries with rich nested entries (multiple
+# senses, grammar/gender annotations, usage notes - e.g. the nl-de dict),
+# keep only the text wrapped in <b> and drop everything else, rather than
+# showing the full formatted definition. Verified against dicthtml-nl-de.zip:
+# that dict consistently bolds the actual German translation and italicizes
+# the Dutch gloss/grammar notes, so this reduces clutter like "*(die*)"
+# gender tags down to just the translation word(s). Has no effect on
+# flat-format dicts (e.g. nl-en), where <b> wraps the repeated headword
+# instead - those are left as full text. Comment out to see full definitions
+# again.
+translation_tag=b
+#
+# dict_examples=true: build a ChatGPT/Lexicala-style card (bold headword +
+# alternatives + one example, on both the front and back) straight from the
+# dict's own example phrases, instead of the plain translation list above.
+# Off by default - only verified against dicthtml-nl-de.zip, and requires
+# translation_tag to also be set (it's what isolates the bold translation
+# from the surrounding gloss/grammar text). A different nested-format dict
+# may structure its examples differently; check a few entries with
+# `kobo-vocab -test-dict` before turning this on for one. Words the dict
+# doesn't illustrate with an example (common for rarer vocabulary) still get
+# a themed card, just without the example.
+# dict_examples=true
 reduce_double=true
 strip=en
 strip=s
@@ -23,7 +141,12 @@ strip=tje
 strip=pje
 strip=ende
 strip=ende>en
+strip=ing>en
+strip=de>en
+strip=d>en
 prefix_strip=ge
+prefix_strip=in
+prefix_strip=uit
 
 [de]
 reduce_double=true

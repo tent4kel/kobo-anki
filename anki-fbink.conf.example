@@ -1,16 +1,49 @@
 # FBInk display configuration
 font_dir=/mnt/onboard/fonts/extra-kobo
 font_front=KF_Newsreader-Regular.ttf
-font_back=KF_Newsreader-Italic.ttf
+font_back=KF_Newsreader-Regular.ttf
 font_menu=KF_Newsreader-Regular.ttf
+
+# Optional: explicit bold/italic files for Markdown emphasis in card text.
+# If omitted, a same-directory "Foo-Regular.ttf" -> "Foo-Bold.ttf" naming
+# convention is tried automatically; if no real file is found either way,
+# bold falls back to a synthetic double-strike and italic falls back to
+# plain (no synthetic italic - shearing rasterized glyphs by hand risked
+# producing corrupted output without a real device to verify it on).
+# font_front_bold=KF_Newsreader-Bold.ttf
+# font_front_italic=KF_Newsreader-Italic.ttf
+# font_back_bold=KF_Newsreader-Bold.ttf
 
 # Font sizes (in points for TrueType)
 size_title=24
 size_card=28
 size_menu=16
 
+# Line height, as a multiplier on the font's natural line height (e.g. 1.2
+# for 20% extra spacing between lines). 1.0 = font's own metrics, unchanged.
+line_height=1.0
+
+# Margin in pixels around the card content area (front/back text).
+# 0 = content runs edge to edge, as before this setting existed.
+margin=0
+
 # Display
 darkmode=false
 
 # Touch cooldown in milliseconds
 touch_cooldown=300
+
+# Optional: per-deck overrides. Any of the keys above (font_*, size_*,
+# line_height, margin, darkmode) can be overridden for one specific deck -
+# the deck name is the CSV filename without ".csv" (e.g. words/vocab-nl-de.csv
+# -> "vocab-nl-de"). Only applies to the front/back card screens, not the
+# deck list or other chrome. Unset keys fall back to the global defaults
+# above.
+#
+# [deck:vocab-nl-de]
+# size_card=32
+# line_height=1.3
+#
+# [deck:vocab-ja-en]
+# font_back=NotoSansJP-Regular.ttf
+# size_card=24
