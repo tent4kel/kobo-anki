@@ -182,6 +182,7 @@ func loadConfig(path string) Config {
 	warn := core.NewConfigWarnings(path)
 	defer warn.Summary()
 
+	outWasSet := false
 	var currentLang *LangRules
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
@@ -259,6 +260,7 @@ func loadConfig(path string) Config {
 				cfg.DBPath = val
 			case "out":
 				cfg.OutDir = val
+				outWasSet = true
 			case "auto_parse":
 				// Read by start.sh (shell grep), not by this binary - listed
 				// here only so it isn't reported as an unknown setting.
@@ -327,6 +329,25 @@ func loadConfig(path string) Config {
 	// Resolve relative paths against config file directory
 	absPath, _ := filepath.Abs(path)
 	confDir := filepath.Dir(absPath)
+
+	// Where decks go is one decision, but it used to be spelled twice: out=
+	// here and data_dir= in anki-core.conf, which the review UIs read. Set
+	// only one of them and kobo-vocab happily wrote decks the UIs never
+	// looked at, with no error from either side. anki-core.conf is now the
+	// single source of truth; out= remains as an override, and disagreeing
+	// with data_dir is reported rather than silently honoured.
+	coreConfPath := filepath.Join(confDir, "anki-core.conf")
+	if _, err := os.Stat(coreConfPath); err == nil {
+		dataDir := core.LoadCoreConfig(coreConfPath).DataDir
+		switch {
+		case !outWasSet:
+			cfg.OutDir = dataDir
+		case cfg.OutDir != dataDir:
+			log.Printf("%s: out=%q disagrees with data_dir=%q in %s - kobo-vocab will write decks "+
+				"where the flashcard app is not looking; remove out= to follow anki-core.conf",
+				path, cfg.OutDir, dataDir, coreConfPath)
+		}
+	}
 	if !filepath.IsAbs(cfg.DictDir) {
 		cfg.DictDir = filepath.Join(confDir, cfg.DictDir)
 	}

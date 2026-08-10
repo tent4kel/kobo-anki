@@ -38,31 +38,65 @@ You also need the `fbink` binary. Download the Kobo build from [FBInk releases](
 
 ## Installation
 
-Copy to your Kobo via USB or SCP:
+First copy the `.example` config files and rename them (remove `.example`), then edit to match
+your setup.
+
+### Deploying over FTP (recommended)
+
+`deploy-ftp.sh` builds the ARM binaries and pushes everything to a Kobo over plain FTP, which
+is all the stock Kobo FTP server supports. Create `deploy.conf` (see `deploy.conf.example`,
+gitignored) so you don't retype the connection details:
+
+```sh
+KOBO_HOST=192.168.1.50
+KOBO_PORT=1021
+KOBO_USER=root
+KOBO_FOLDER=kobo-anki
+```
+
+Then:
+
+```sh
+./deploy-ftp.sh                    # uses deploy.conf
+./deploy-ftp.sh 192.168.1.50       # or pass the host directly
+```
+
+It never touches `words/` (your review progress) or on-device logs — only the files that ship
+with the app — so it's safe to re-run as often as you like.
+
+### Resulting layout on the device
+
+Both the FTP script and a manual USB/SCP copy end up with this, under
+`/mnt/onboard/.adds/<KOBO_FOLDER>/kobo-anki/`:
 
 ```
-/mnt/onboard/.adds/kobo-anki/
+/mnt/onboard/.adds/kobo-anki/kobo-anki/
 ├── bin/
 │   ├── kobo-anki-fbink
 │   ├── kobo-anki-server
 │   ├── kobo-vocab
 │   └── fbink              ← from FBInk releases
 ├── start.sh
-├── anki-core.conf          ← copy from .example files
+├── anki-core.conf          ← copy from the .example files
 ├── anki-fbink.conf
 ├── anki-mywords.conf
+├── cacert.pem              ← needed for the online providers, see below
+├── dict/                   ← dicthtml-*.zip dictionaries
+├── APIs/                   ← provider credentials, only if you use them
 ├── templates/              ← only needed for server mode
+├── french.csv              ← sample deck; copy into words/ to try it
 └── words/                  ← flashcard CSVs go here
 ```
 
-Copy the `.example` config files and rename them (remove `.example`). Edit to match your setup.
+Setting `KOBO_FOLDER=kobo-anki-beta` gives you a second, independent install alongside a
+stable one — handy for testing a build without disturbing your daily decks.
 
 ### NickelMenu config
 
-Add to `/mnt/onboard/.adds/nm/config`:
+Add to `/mnt/onboard/.adds/nm/config`, matching the folder you deployed to:
 
 ```
-menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
+menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/kobo-anki/start.sh
 ```
 
 ## Configuration

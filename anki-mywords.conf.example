@@ -6,7 +6,13 @@
 #   dict_dir=/mnt/onboard/.kobo/dict          (Kobo built-in dicts)
 dict_dir=dict
 db=/mnt/onboard/.kobo/KoboReader.sqlite
-out=words
+
+# Where generated decks go. Normally leave this alone: it follows data_dir
+# in anki-core.conf, which is where the flashcard app looks for them, so the
+# location is set in exactly one place. Uncomment only to write decks
+# somewhere else on purpose - if it disagrees with data_dir, kobo-vocab says
+# so rather than quietly producing decks the app never shows.
+# out=words
 
 # Automatically run kobo-vocab in the background at every startup.
 # Off by default — enable once you're happy with your dictionary setup,
