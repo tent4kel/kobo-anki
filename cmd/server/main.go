@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -27,10 +28,17 @@ var (
 type studyData struct {
 	Card      *core.Card
 	FrontHTML template.HTML
-	BackHTML  template.HTML
-	Deck      string
-	Key       string // original card.Front for URL lookups
-	Reverse   bool
+	// FrontHeadwordHTML is just the leading **bold** headword out of
+	// FrontHTML's source, for the small gray "front repeated" field on the
+	// back template - with dict_examples/card_format, FrontHTML can carry
+	// alternatives and an example too, which is too much to restate there;
+	// this is a reminder of which word the card is about, not a second
+	// copy of the front page (which still uses the full FrontHTML).
+	FrontHeadwordHTML template.HTML
+	BackHTML          template.HTML
+	Deck              string
+	Key               string // original card.Front for URL lookups
+	Reverse           bool
 }
 
 // renderMD converts a card field (which may be Markdown emitted by
@@ -46,14 +54,33 @@ func renderMD(s string) template.HTML {
 	return template.HTML(buf.String())
 }
 
+// leadingBoldRe matches a **bold** run anchored at the very start of a
+// card_format-built string - kobo-vocab always puts the headword there
+// first when it's present at all.
+var leadingBoldRe = regexp.MustCompile(`(?s)^\*\*(.+?)\*\*`)
+
+// headwordOnly extracts just the leading **bold** headword from card
+// Markdown, discarding alternatives/example - mirrors cmd/fbink's function
+// of the same name/purpose. Falls back to the full string unchanged if it
+// doesn't start with a bold run (e.g. a custom card_format that doesn't
+// bold the headword), so an unexpected shape still shows something.
+func headwordOnly(s string) string {
+	m := leadingBoldRe.FindStringSubmatch(s)
+	if m == nil {
+		return s
+	}
+	return "**" + m[1] + "**"
+}
+
 func newStudyData(display *core.Card, deck, key string, reverse bool) studyData {
 	return studyData{
-		Card:      display,
-		FrontHTML: renderMD(display.Front),
-		BackHTML:  renderMD(display.Back),
-		Deck:      deck,
-		Key:       key,
-		Reverse:   reverse,
+		Card:              display,
+		FrontHTML:         renderMD(display.Front),
+		FrontHeadwordHTML: renderMD(headwordOnly(display.Front)),
+		BackHTML:          renderMD(display.Back),
+		Deck:              deck,
+		Key:               key,
+		Reverse:           reverse,
 	}
 }
 

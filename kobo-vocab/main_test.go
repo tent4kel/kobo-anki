@@ -105,6 +105,63 @@ func TestComputeGroupsExcludesExistingAndMissedWords(t *testing.T) {
 	}
 }
 
+func TestComputeGroupsRecognizesWordsWithStyledFrontAsExisting(t *testing.T) {
+	// Regression test: dict_examples/lexicala/chatgpt override Entry.Front
+	// with styled card content (e.g. "**behoefte**\n*een voorbeeldzin*")
+	// instead of leaving it as the plain word. readExistingCSV's dedup key
+	// is that CSV front column, so once Front diverges from the raw Kobo
+	// word, the CSV-based check alone can never match it again - the word
+	// looks "new" every single run, duplicating it forever. vocab-seen-*.txt
+	// (independent of card content, see computeGroups/appendMisses call
+	// sites in main()) is the fix - verify it alone is enough to exclude
+	// the word even though its CSV front doesn't match the raw word at all.
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
+	createTestDB(dbPath)
+
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	defer db.Close()
+
+	cfg := loadConfig("")
+	cfg.OutDir = t.TempDir()
+
+	_, totalNew, err := computeGroups(cfg, db)
+	if err != nil {
+		t.Fatalf("computeGroups: %v", err)
+	}
+	if totalNew != 15 {
+		t.Fatalf("first pass totalNew = %d, want 15", totalNew)
+	}
+
+	// Simulate exporting "behoefte" with a styled front that no longer
+	// matches the raw word - what dict_examples/lexicala/chatgpt actually
+	// produce - and record it as seen, exactly as main()'s export step now
+	// does after this fix.
+	csvPath := filepath.Join(cfg.OutDir, "vocab-nl-en.csv")
+	exportCSV(csvPath, nil, []Translation{{
+		Word:        "**behoefte**\n*een voorbeeldzin*",
+		Translation: "**need**\n*an example sentence*",
+		FromLang:    "nl", ToLang: "en", Source: "dict",
+	}})
+	seenPath := filepath.Join(cfg.OutDir, "vocab-seen-nl-en.txt")
+	appendMisses(seenPath, []string{"behoefte"})
+
+	groups, totalNew, err := computeGroups(cfg, db)
+	if err != nil {
+		t.Fatalf("computeGroups (second pass): %v", err)
+	}
+	if totalNew != 14 {
+		t.Errorf("second pass totalNew = %d, want 14 (15 - 1 seen, despite the CSV front not matching the raw word)", totalNew)
+	}
+	for _, w := range groups["-nl-en"].newWords {
+		if strings.ToLower(w.Text) == "behoefte" {
+			t.Errorf("behoefte was re-offered as new - vocab-seen-*.txt was not consulted")
+		}
+	}
+}
+
 func TestExtractEntryFlatFormat(t *testing.T) {
 	block := `<w><a name="Aagje"/><div><b>Aagje</b><br/><font color="#007000">noun</font><br>
 female first name</div></w>`
@@ -236,11 +293,11 @@ func TestExtractEntryCardWithExample(t *testing.T) {
 	if word != "afspraak" {
 		t.Errorf("word = %q, want afspraak", word)
 	}
-	wantDef := "**Verabredung**, Vereinbarung *eine Verabredung treffen*"
+	wantDef := "**Verabredung**\nVereinbarung\n*eine Verabredung treffen*"
 	if def != wantDef {
 		t.Errorf("def = %q, want %q", def, wantDef)
 	}
-	wantFront := "**afspraak** *een afspraak maken*"
+	wantFront := "**afspraak**\n*een afspraak maken*"
 	if front != wantFront {
 		t.Errorf("front = %q, want %q", front, wantFront)
 	}
@@ -302,7 +359,7 @@ func TestExtractEntryCardExampleWithInlineAnnotationDoesNotNestMarkdown(t *testi
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	want := "**schrecklich** *(ook) verheerende Folgen*"
+	want := "**schrecklich**\n*(ook) verheerende Folgen*"
 	if def != want {
 		t.Errorf("def = %q, want %q (no nested/unbalanced emphasis markers)", def, want)
 	}

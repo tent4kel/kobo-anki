@@ -2,7 +2,6 @@ package core
 
 import (
 	"bufio"
-	"encoding/csv"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -14,11 +13,11 @@ import (
 )
 
 type CoreConfig struct {
-	DataDir            string
-	Reverse            bool
-	RequestRetention   float64
-	MaximumInterval    float64
-	EnableShortTerm    bool
+	DataDir          string
+	Reverse          bool
+	RequestRetention float64
+	MaximumInterval  float64
+	EnableShortTerm  bool
 }
 
 func LoadCoreConfig(path string) CoreConfig {
@@ -152,7 +151,7 @@ func LoadCards(csvFile string) ([]Card, error) {
 	}
 	defer file.Close()
 
-	rows, err := csv.NewReader(file).ReadAll()
+	rows, err := NewSpreadsheetCSVReader(file).ReadAll()
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +194,10 @@ func SaveCards(csvFile string, cards []Card) error {
 	}
 	defer file.Close()
 
-	w := csv.NewWriter(file)
+	w, err := NewSpreadsheetCSVWriter(file)
+	if err != nil {
+		return err
+	}
 	defer w.Flush()
 
 	w.Write([]string{"front", "back", "due", "stability", "difficulty",

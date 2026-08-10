@@ -230,6 +230,20 @@ hello,bonjour
 merci,thank you
 ```
 
+`french.csv` in the repo root is a small ready-to-use sample deck — copy it into your
+`words/` directory to try the app before setting up any dictionaries.
+
+**Spreadsheet-friendly.** Decks are written as UTF-8 with a BOM and CRLF row terminators, so
+they open correctly by double-click in Excel and Numbers — without the BOM, Excel guesses the
+encoding and mangles accented characters (`Größe` → `GrÃ¶ÃŸe`). Card text can legitimately
+contain line breaks, which appear as multi-line quoted fields; that is valid RFC 4180 and
+spreadsheets render it as one cell, but it does mean a deck is not one-card-per-physical-line
+for tools like `grep`. Files written before this change (no BOM) still load fine.
+
+One caveat: Excel in a locale whose list separator is `;` (German, Dutch, French…) may put
+everything in a single column on double-click. Use *Data → From Text/CSV* and pick comma, or
+open with Numbers/LibreOffice, which honor the comma regardless of locale.
+
 ## Dictionaries
 
 kobo-vocab uses Kobo-format dictionaries (`dicthtml-*.zip`). These are the same format used by the Kobo reader itself. Place dictionary zips in the `dict/` directory (gitignored, not checked into the repo — bring your own).

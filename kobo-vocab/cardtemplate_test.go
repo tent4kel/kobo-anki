@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestCardTemplateDefaultMatchesOldFormatCard(t *testing.T) {
+func TestCardTemplateDefault(t *testing.T) {
 	tpl, err := parseCardTemplate(DefaultCardFormat)
 	if err != nil {
 		t.Fatalf("parseCardTemplate(DefaultCardFormat): %v", err)
@@ -14,10 +14,10 @@ func TestCardTemplateDefaultMatchesOldFormatCard(t *testing.T) {
 		example      string
 		want         string
 	}{
-		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**, stappen, wandelen *Zij liepen.*"},
+		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**\nstappen, wandelen\n*Zij liepen.*"},
 		{"headword only", "lopen", nil, "", "**lopen**"},
-		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen** *Zij liepen.*"},
-		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**, stappen"},
+		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen**\n*Zij liepen.*"},
+		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**\nstappen"},
 		{"everything empty", "", nil, "", ""},
 	}
 	for _, c := range cases {
@@ -48,6 +48,22 @@ func TestCardTemplateCustomReordering(t *testing.T) {
 	// emitted even with no alternatives.
 	got = tpl.render("lopen", nil, "")
 	want = "lopen"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCardTemplateLineBreakEscape(t *testing.T) {
+	// card_format is one line in the conf file, so "\n" is the only way to
+	// put an actual line break in a template - verifies it's recognized
+	// both outside and inside an [optional] block, and that "\\" still
+	// produces a literal backslash rather than being misread as an escape.
+	tpl, err := parseCardTemplate(`{head}\n[{ex}]\\`)
+	if err != nil {
+		t.Fatalf("parseCardTemplate: %v", err)
+	}
+	got := tpl.render("lopen", nil, "Ik loop.")
+	want := "lopen\nIk loop.\\"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

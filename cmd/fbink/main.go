@@ -1017,16 +1017,21 @@ func drawBackScreen() {
 	availRect := Rect{contentRect.X, availTop, contentRect.W, actionRect.Y - availTop}
 	cardRect := inset(availRect, activeStyle.Margin)
 
-	// Front text (small, gray, above the answer). Fixed height (2 lines'
-	// worth at SizeMenu, from font metrics alone) regardless of the actual
-	// front/answer content, so its position never shifts card to card -
-	// content is then centered within that stable slot.
+	// Front text (small, gray, above the answer) - just the headword
+	// (headwordOnly), not the full front face: with dict_examples/
+	// card_format, the front can carry alternatives and an example too,
+	// which is too much to restate here - this is a reminder of which word
+	// the card is about, not a second copy of the front screen. Fixed
+	// height (2 lines' worth at SizeMenu, from font metrics alone)
+	// regardless of the actual front/answer content, so its position never
+	// shifts card to card - content is then centered within that stable
+	// slot.
 	frontLineHeight := activeStyle.SizeMenu * 2 // conservative fallback if font resolution fails
 	if regular, err := makeFaceResolver(FontFront, activeStyle.SizeMenu)(StyleRegular); err == nil {
 		frontLineHeight = scaledLineHeight(regular.Face)
 	}
 	frontRect := Rect{cardRect.X, cardRect.Y, cardRect.W, frontLineHeight * 2}
-	drawMarkdownLabel(frontRect, displayFront(), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
+	drawMarkdownLabel(frontRect, headwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
 
 	// Answer text — this rect is itself fixed (anchored right below the
 	// fixed frontRect), so centering within it can't cause any jumping;

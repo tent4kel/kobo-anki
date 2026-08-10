@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// DefaultCardFormat reproduces formatCard's original hardcoded shape: bold
-// headword, comma-joined alternatives, italic example - each bracketed part
-// dropped independently (no dangling ", " or " **" when its own
-// placeholder is empty), exactly as the hand-written version did before
-// card_format existed.
-const DefaultCardFormat = "[**{head}**][, {alts}][ *{ex}*]"
+// DefaultCardFormat: bold headword, a line break, comma-joined
+// alternatives, another line break, then the italic example - three lines,
+// each bracketed part dropped independently (no blank line left behind
+// when its own placeholder is empty, e.g. no example means the last line
+// just isn't there rather than an empty trailing line).
+const DefaultCardFormat = "[**{head}**][\n{alts}][\n*{ex}*]"
 
 // cardTemplate is a compiled card_format string - see parseCardTemplate.
 // Compile once per provider/dict construction, not per word: dict lookups
@@ -40,12 +40,15 @@ var validPlaceholders = map[string]bool{"head": true, "alts": true, "ex": true}
 
 // parseCardTemplate compiles a card_format string (see card_format in
 // anki-mywords.conf.example) into a cardTemplate. Supports {head}/{alts}/
-// {ex} placeholders and one level of [optional] bracketing - no nesting, no
-// escaping (a template needing a literal '{'/'['/']'/'}' isn't a use case
-// this needs to cover). A bracketed run disappears entirely, rather than
-// leaving dangling punctuation behind, when every placeholder inside it is
-// empty - e.g. "[, {alts}]" vanishes rather than emitting ", " when there
-// are no alternatives. Text outside any brackets is always emitted as-is,
+// {ex} placeholders and one level of [optional] bracketing - no nesting.
+// "\n" is recognized as a line-break escape (config values are one line
+// each, so a card_format wanting an actual line break has no other way to
+// write one) and "\\" as a literal backslash; no other escaping (a template
+// needing a literal '{'/'['/']'/'}' isn't a use case this needs to cover).
+// A bracketed run disappears entirely, rather than leaving dangling
+// punctuation behind, when every placeholder inside it is empty - e.g.
+// "[, {alts}]" vanishes rather than emitting ", " when there are no
+// alternatives. Text outside any brackets is always emitted as-is,
 // placeholders and all, even if a placeholder resolves empty - brackets are
 // opt-in, not inferred.
 func parseCardTemplate(s string) (cardTemplate, error) {
@@ -98,6 +101,18 @@ func parseCardTemplate(s string) (cardTemplate, error) {
 			flushPart()
 			inBracket = false
 			i++
+		case '\\':
+			if i+1 < len(s) && (s[i+1] == 'n' || s[i+1] == '\\') {
+				if s[i+1] == 'n' {
+					literal.WriteByte('\n')
+				} else {
+					literal.WriteByte('\\')
+				}
+				i += 2
+			} else {
+				literal.WriteByte(s[i])
+				i++
+			}
 		default:
 			literal.WriteByte(s[i])
 			i++

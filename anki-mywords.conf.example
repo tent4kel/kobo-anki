@@ -86,15 +86,20 @@ chatgpt_max_alternatives=3
 #
 # Placeholders: {head} {alts} {ex}. Wrap a chunk in [...] to drop it
 # entirely - not just leave it blank - when every placeholder inside it is
-# empty, e.g. "[, {alts}]" disappears rather than leaving a dangling ", "
-# when a word has no alternatives. No nesting, no escaping. Keep separating
-# punctuation/spaces INSIDE the brackets they belong to, not floating
-# between two bracketed groups, or a dropped middle group can leave a
-# double space behind (e.g. write "{head}[, {alts}][ *{ex}*]", not
-# "{head} [{alts}] [{ex}]").
+# empty, e.g. "[\n{alts}]" disappears rather than leaving a stray blank line
+# when a word has no alternatives. No nesting. "\n" inserts an actual line
+# break (a config value is one physical line, so this is the only way to
+# put one in) and "\\" a literal backslash; no other escaping. Keep
+# separating punctuation/spaces/breaks INSIDE the brackets they belong to,
+# not floating between two bracketed groups, or a dropped middle group can
+# leave a double space (or blank line) behind (e.g. write
+# "{head}[\n{alts}][\n*{ex}*]", not "{head} [{alts}]\n[{ex}]").
 #
-# The default below reproduces the original hardcoded style exactly:
-card_format=[**{head}**][, {alts}][ *{ex}*]
+# The default below: bold headword, a line break, comma-joined alternatives,
+# another line break, then the italic example - each on its own line, with
+# any missing piece (no alternatives, no example) simply not leaving a line
+# behind rather than an empty gap.
+card_format=[**{head}**][\n{alts}][\n*{ex}*]
 
 [nl]
 # Any of max_senses/max_depth/max_chars can also be set per language,

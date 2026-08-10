@@ -4,6 +4,10 @@ kobo-anki
 kobo-anki-fbink
 kobo-anki-server
 kobo-vocab/kobo-vocab
+# `go build ./...` drops a binary named after each main package into its own
+# directory - catch those so they can't be committed by accident
+cmd/fbink/fbink
+cmd/server/server
 
 # Deployment zips
 *.zip
@@ -16,6 +20,8 @@ kobo-vocab/kobodict/
 # User data
 words/
 *.csv
+# ...except the sample deck, so a fresh clone is runnable out of the box
+!french.csv
 *.sqlite
 *.txt
 

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"database/sql"
-	"encoding/csv"
 	"flag"
 	"fmt"
 	"html"
@@ -18,6 +17,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"kobo-anki/core"
 
 	_ "modernc.org/sqlite"
 )
@@ -343,6 +344,7 @@ type langGroup struct {
 	existing         map[string][]string // existing CSV rows keyed by word
 	existingRows     [][]string          // existing CSV rows in order
 	newWords         []VocabWord
+	seenPath         string // vocab-seen-*.txt for this pair - see readSeenWords
 }
 
 // computeGroups reads the Kobo word list, groups it by language pair, and
@@ -377,9 +379,21 @@ func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, to
 
 		csvPath := filepath.Join(cfg.OutDir, fmt.Sprintf("vocab-%s-%s.csv", fromLang, toLang))
 		missesPath := filepath.Join(cfg.OutDir, fmt.Sprintf("vocab-misses-%s-%s.txt", fromLang, toLang))
+		seenPath := filepath.Join(cfg.OutDir, fmt.Sprintf("vocab-seen-%s-%s.txt", fromLang, toLang))
 
 		existing, existingRows := readExistingCSV(csvPath)
 		misses := readMisses(missesPath)
+		// existing keys the CSV's front column against the raw Kobo word,
+		// which only still matches once a provider starts overriding
+		// Entry.Front with styled card content (dict_examples, lexicala,
+		// chatgpt) instead of leaving it as the plain word - e.g. front
+		// becomes "**afspraak**\nmet iemand..." while the Kobo word list
+		// still says "afspraak", so the CSV check alone stopped matching
+		// and every such word looked "new" again on every run, duplicating
+		// it. seen tracks the raw word independently of card content -
+		// see readMisses/appendMisses below main(), reused as-is (a plain
+		// word-list file, nothing miss-specific about the implementation).
+		seen := readMisses(seenPath)
 
 		var newWords []VocabWord
 		for _, w := range langWords {
@@ -390,10 +404,13 @@ func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, to
 			if misses[key] {
 				continue
 			}
+			if seen[key] {
+				continue
+			}
 			newWords = append(newWords, w)
 		}
 
-		groups[suffix] = &langGroup{fromLang, toLang, existing, existingRows, newWords}
+		groups[suffix] = &langGroup{fromLang, toLang, existing, existingRows, newWords, seenPath}
 		if len(newWords) > 0 {
 			totalNew += len(newWords)
 			log.Printf("%s→%s: %d new words to translate", fromLang, toLang, len(newWords))
@@ -505,6 +522,7 @@ func main() {
 
 		var newTranslations []Translation
 		var newMisses []string
+		var newSeen []string
 
 		for _, w := range g.newWords {
 			entry, err := chain.Lookup(w.Text, g.fromLang, g.toLang)
@@ -524,6 +542,7 @@ func main() {
 			}
 			t := Translation{front, def, g.fromLang, g.toLang, entry.Source}
 			newTranslations = append(newTranslations, t)
+			newSeen = append(newSeen, strings.ToLower(w.Text))
 			fmt.Printf("  [%-10s] %s → %s\n", entry.Source, w.Text, entry.Definition)
 		}
 
@@ -541,6 +560,13 @@ func main() {
 		if len(newMisses) > 0 {
 			missesPath := filepath.Join(cfg.OutDir, fmt.Sprintf("vocab-misses-%s-%s.txt", g.fromLang, g.toLang))
 			appendMisses(missesPath, newMisses)
+		}
+
+		// Save seen (raw Kobo words that got a real translation) - see the
+		// comment in computeGroups on why this can't just be the CSV's
+		// front column anymore.
+		if len(newSeen) > 0 {
+			appendMisses(g.seenPath, newSeen)
 		}
 	}
 }
@@ -1283,7 +1309,12 @@ func parseLangPair(dictSuffix string) (from, to string) {
 	return "", ""
 }
 
-// --- Misses tracking ---
+// --- Word-list tracking (misses and seen words) ---
+//
+// Both a "miss" (no provider found anything) and a "seen" word (a real
+// translation was produced) are, on disk, just a plain lowercased
+// word-per-line file - readMisses/appendMisses aren't miss-specific despite
+// the name, and are reused as-is for vocab-seen-*.txt too.
 
 func readMisses(path string) map[string]bool {
 	result := make(map[string]bool)
@@ -1327,7 +1358,10 @@ func exportCSV(path string, existingRows [][]string, newTranslations []Translati
 	}
 	defer f.Close()
 
-	w := csv.NewWriter(f)
+	w, err := core.NewSpreadsheetCSVWriter(f)
+	if err != nil {
+		return err
+	}
 	defer w.Flush()
 	w.Write([]string{"front", "back", "due", "stability", "difficulty",
 		"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
@@ -1355,7 +1389,7 @@ func readExistingCSV(path string) (map[string][]string, [][]string) {
 	}
 	defer f.Close()
 
-	allRows, err := csv.NewReader(f).ReadAll()
+	allRows, err := core.NewSpreadsheetCSVReader(f).ReadAll()
 	if err != nil {
 		return byWord, rows
 	}
