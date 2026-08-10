@@ -322,11 +322,19 @@ type StyleOverride struct {
 // cfg defaults. Called wherever rendering needs to know "the style for the
 // deck currently on screen" (currentDeck).
 func effectiveStyle(deckName string) Style {
-	s := cfg
 	o, ok := deckOverrides[deckName]
 	if !ok {
-		return s
+		return cfg
 	}
+	return applyStyleOverride(cfg, o)
+}
+
+// applyStyleOverride returns s with every field the override actually sets
+// replaced. Used both to merge a [deck:NAME] section onto the global
+// defaults and, in loadConfig, to fold the pre-section keys into those
+// defaults - so the config file's keys are recognised by exactly one switch
+// (applyStyleKey) instead of two parallel ones that had to be kept in sync.
+func applyStyleOverride(s Style, o *StyleOverride) Style {
 	if o.FontDir != nil {
 		s.FontDir = *o.FontDir
 	}
@@ -417,7 +425,11 @@ func loadConfig() {
 	warn := core.NewConfigWarnings(confPath)
 	defer warn.Summary()
 
-	var override *StyleOverride // nil while parsing global (pre-section) keys
+	// Keys before the first [deck:NAME] section are parsed into an override
+	// too, then folded into cfg below - so applyStyleKey is the single place
+	// that knows the config file's key names.
+	globalOverride := &StyleOverride{}
+	override := globalOverride
 
 	for i, line := range strings.Split(string(data), "\n") {
 		lineNo := i + 1
@@ -439,64 +451,21 @@ func loadConfig() {
 		}
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 
-		if override != nil {
-			applyStyleKey(override, key, value, lineNo, warn)
+		// touch_cooldown is the one setting that is not part of Style, and
+		// is global-only - a [deck:NAME] section has no use for it.
+		if key == "touch_cooldown" {
+			if override != globalOverride {
+				warn.UnknownKey(lineNo, key)
+			} else if v, ok := warn.Int(lineNo, key, value); ok {
+				touchCooldown = time.Duration(v) * time.Millisecond
+			}
 			continue
 		}
 
-		switch key {
-		case "font_dir":
-			cfg.FontDir = value
-		case "font_front":
-			cfg.FontFront = value
-		case "font_back":
-			cfg.FontBack = value
-		case "font_menu":
-			cfg.FontMenu = value
-		case "font_front_bold":
-			cfg.FontFrontBold = value
-		case "font_front_italic":
-			cfg.FontFrontItalic = value
-		case "font_back_bold":
-			cfg.FontBackBold = value
-		case "font_back_italic":
-			cfg.FontBackItalic = value
-		case "font_menu_bold":
-			cfg.FontMenuBold = value
-		case "font_menu_italic":
-			cfg.FontMenuItalic = value
-		case "size_title":
-			if v, ok := warn.Int(lineNo, key, value); ok {
-				cfg.SizeTitle = v
-			}
-		case "size_card":
-			if v, ok := warn.Int(lineNo, key, value); ok {
-				cfg.SizeCard = v
-			}
-		case "size_menu":
-			if v, ok := warn.Int(lineNo, key, value); ok {
-				cfg.SizeMenu = v
-			}
-		case "line_height":
-			if v, ok := warn.Float(lineNo, key, value); ok {
-				cfg.LineHeight = v
-			}
-		case "margin":
-			if v, ok := warn.Int(lineNo, key, value); ok {
-				cfg.Margin = v
-			}
-		case "darkmode":
-			if v, ok := warn.Bool(lineNo, key, value); ok {
-				cfg.DarkMode = v
-			}
-		case "touch_cooldown":
-			if v, ok := warn.Int(lineNo, key, value); ok {
-				touchCooldown = time.Duration(v) * time.Millisecond
-			}
-		default:
-			warn.UnknownKey(lineNo, key)
-		}
+		applyStyleKey(override, key, value, lineNo, warn)
 	}
+
+	cfg = applyStyleOverride(cfg, globalOverride)
 
 	if debug {
 		fmt.Printf("Config: FontDir=%s, DarkMode=%v, deckOverrides=%d\n", cfg.FontDir, cfg.DarkMode, len(deckOverrides))
