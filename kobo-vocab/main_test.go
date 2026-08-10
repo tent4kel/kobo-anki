@@ -2,7 +2,9 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
 	"database/sql"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -641,5 +643,24 @@ func TestTruncateMarkdownVisibleZeroMeansUnlimited(t *testing.T) {
 	s := "some text **with bold** that should not be cut"
 	if got := truncateMarkdownVisible(s, 0); got != s {
 		t.Errorf("got %q, want unchanged input when maxChars=0", got)
+	}
+}
+
+func TestLoadConfigDoesNotWarnAboutAutoParse(t *testing.T) {
+	// auto_parse lives in anki-mywords.conf but is read by start.sh's shell
+	// grep, not by this binary. It must be recognized here anyway, or every
+	// real run prints a spurious "unknown setting" warning.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "anki-mywords.conf")
+	os.WriteFile(p, []byte("auto_parse=true\nproviders=dict\n"), 0644)
+
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	loadConfig(p)
+	log.SetOutput(old)
+
+	if strings.Contains(buf.String(), "auto_parse") {
+		t.Errorf("auto_parse was reported as unknown:\n%s", buf.String())
 	}
 }

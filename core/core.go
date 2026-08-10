@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -34,8 +35,13 @@ func LoadCoreConfig(path string) CoreConfig {
 	}
 	defer f.Close()
 
+	warn := NewConfigWarnings(path)
+	defer warn.Summary()
+
 	scanner := bufio.NewScanner(f)
+	lineNo := 0
 	for scanner.Scan() {
+		lineNo++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || line[0] == '#' {
 			continue
@@ -49,17 +55,23 @@ func LoadCoreConfig(path string) CoreConfig {
 		case "data_dir":
 			cfg.DataDir = val
 		case "reverse":
-			cfg.Reverse = val == "true" || val == "1"
+			if v, ok := warn.Bool(lineNo, key, val); ok {
+				cfg.Reverse = v
+			}
 		case "request_retention":
-			if v, err := strconv.ParseFloat(val, 64); err == nil {
+			if v, ok := warn.Float(lineNo, key, val); ok {
 				cfg.RequestRetention = v
 			}
 		case "maximum_interval":
-			if v, err := strconv.ParseFloat(val, 64); err == nil {
+			if v, ok := warn.Float(lineNo, key, val); ok {
 				cfg.MaximumInterval = v
 			}
 		case "enable_short_term":
-			cfg.EnableShortTerm = val == "true" || val == "1"
+			if v, ok := warn.Bool(lineNo, key, val); ok {
+				cfg.EnableShortTerm = v
+			}
+		default:
+			warn.UnknownKey(lineNo, key)
 		}
 	}
 	return cfg
@@ -187,36 +199,35 @@ func LoadCards(csvFile string) ([]Card, error) {
 	return cards, nil
 }
 
+// SaveCards writes the whole deck atomically (see WriteFileAtomic) - an
+// interrupted save leaves the previous deck intact rather than a truncated
+// one, which matters because this runs on every card rating.
 func SaveCards(csvFile string, cards []Card) error {
-	file, err := os.Create(csvFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	return WriteFileAtomic(csvFile, 0644, func(f io.Writer) error {
+		w, err := NewSpreadsheetCSVWriter(f)
+		if err != nil {
+			return err
+		}
 
-	w, err := NewSpreadsheetCSVWriter(file)
-	if err != nil {
-		return err
-	}
-	defer w.Flush()
-
-	w.Write([]string{"front", "back", "due", "stability", "difficulty",
-		"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
-	for _, c := range cards {
-		w.Write([]string{
-			c.Front, c.Back,
-			formatTime(c.Due),
-			strconv.FormatFloat(c.Stability, 'f', 4, 64),
-			strconv.FormatFloat(c.Difficulty, 'f', 4, 64),
-			strconv.FormatUint(c.ElapsedDays, 10),
-			strconv.FormatUint(c.ScheduledDays, 10),
-			strconv.FormatUint(c.Reps, 10),
-			strconv.FormatUint(c.Lapses, 10),
-			strconv.Itoa(int(c.State)),
-			formatTime(c.LastReview),
-		})
-	}
-	return nil
+		w.Write([]string{"front", "back", "due", "stability", "difficulty",
+			"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
+		for _, c := range cards {
+			w.Write([]string{
+				c.Front, c.Back,
+				formatTime(c.Due),
+				strconv.FormatFloat(c.Stability, 'f', 4, 64),
+				strconv.FormatFloat(c.Difficulty, 'f', 4, 64),
+				strconv.FormatUint(c.ElapsedDays, 10),
+				strconv.FormatUint(c.ScheduledDays, 10),
+				strconv.FormatUint(c.Reps, 10),
+				strconv.FormatUint(c.Lapses, 10),
+				strconv.Itoa(int(c.State)),
+				formatTime(c.LastReview),
+			})
+		}
+		w.Flush()
+		return w.Error()
+	})
 }
 
 func FindCard(cards []Card, front string) *Card {

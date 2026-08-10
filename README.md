@@ -259,6 +259,24 @@ of the entries it produces), run:
 kobo-vocab -test-dict path/to/dicthtml-xx-yy.zip
 ```
 
+## Checking your configuration
+
+Config files never fail to load: a setting that can't be used keeps its default and the rest
+of the file still applies. Anything ignored is reported with its file and line, so a typo
+doesn't disappear silently:
+
+```
+anki-mywords.conf:14: unknown setting "dict_example" - ignored (typo, or does it belong in another conf file?)
+anki-mywords.conf:22: max_senses="abc" is not a whole number - keeping the default
+```
+
+To see what's actually in force after defaults and `[lang]` overrides are merged — useful when
+a setting doesn't seem to be taking effect — run:
+
+```sh
+kobo-vocab -print-config
+```
+
 ## Launcher scripts
 
 - **start.sh** — Production launcher for NickelMenu. Kills Nickel, feeds the hardware watchdog, runs the app with crash recovery (max 5 restarts), reboots on exit.

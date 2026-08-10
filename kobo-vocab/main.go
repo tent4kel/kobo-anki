@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"kobo-anki/core"
@@ -174,9 +173,14 @@ func loadConfig(path string) Config {
 	}
 	defer f.Close()
 
+	warn := core.NewConfigWarnings(path)
+	defer warn.Summary()
+
 	var currentLang *LangRules
 	scanner := bufio.NewScanner(f)
+	lineNo := 0
 	for scanner.Scan() {
+		lineNo++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || line[0] == '#' {
 			continue
@@ -210,30 +214,35 @@ func loadConfig(path string) Config {
 				}
 				currentLang.Strips = append(currentLang.Strips, sr)
 			case "reduce_double":
-				currentLang.ReduceDouble = val == "true"
+				if v, ok := warn.Bool(lineNo, key, val); ok {
+					currentLang.ReduceDouble = v
+				}
 			case "prefix_strip":
 				currentLang.PrefixStrips = append(currentLang.PrefixStrips, val)
 			case "max_senses":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					currentLang.MaxSenses = &v
 				}
 			case "max_depth":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					currentLang.MaxDepth = &v
 				}
 			case "max_chars":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					currentLang.MaxChars = &v
 				}
 			case "translation_tag":
 				v := val
 				currentLang.TranslationTag = &v
 			case "dict_examples":
-				v := val == "true"
-				currentLang.DictExamples = &v
+				if v, ok := warn.Bool(lineNo, key, val); ok {
+					currentLang.DictExamples = &v
+				}
 			case "providers":
 				v := splitProviders(val)
 				currentLang.Providers = &v
+			default:
+				warn.UnknownKey(lineNo, key)
 			}
 		} else {
 			// Global settings
@@ -244,24 +253,31 @@ func loadConfig(path string) Config {
 				cfg.DBPath = val
 			case "out":
 				cfg.OutDir = val
+			case "auto_parse":
+				// Read by start.sh (shell grep), not by this binary - listed
+				// here only so it isn't reported as an unknown setting.
 			case "api_fallback":
-				cfg.APIFallback = val == "true"
+				if v, ok := warn.Bool(lineNo, key, val); ok {
+					cfg.APIFallback = v
+				}
 			case "max_senses":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.MaxSenses = v
 				}
 			case "max_depth":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.MaxDepth = v
 				}
 			case "max_chars":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.MaxChars = v
 				}
 			case "translation_tag":
 				cfg.TranslationTag = val
 			case "dict_examples":
-				cfg.DictExamples = val == "true"
+				if v, ok := warn.Bool(lineNo, key, val); ok {
+					cfg.DictExamples = v
+				}
 			case "card_format":
 				cfg.CardFormat = val
 			case "providers":
@@ -275,17 +291,19 @@ func loadConfig(path string) Config {
 			case "chatgpt_model":
 				cfg.ChatGPTModel = val
 			case "chatgpt_temperature":
-				if v, err := strconv.ParseFloat(val, 64); err == nil {
+				if v, ok := warn.Float(lineNo, key, val); ok {
 					cfg.ChatGPTTemperature = v
 				}
 			case "chatgpt_max_tokens":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.ChatGPTMaxTokens = v
 				}
 			case "chatgpt_max_alternatives":
-				if v, err := strconv.Atoi(val); err == nil {
+				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.ChatGPTMaxAlternatives = v
 				}
+			default:
+				warn.UnknownKey(lineNo, key)
 			}
 		}
 	}
@@ -428,6 +446,7 @@ func main() {
 	createTest := flag.Bool("create-test-db", false, "create a test KoboReader.sqlite and exit")
 	testDict := flag.String("test-dict", "", "parse a single dicthtml-*.zip and print entry count + samples, then exit")
 	countNew := flag.Bool("count-new", false, "print the number of new words pending lookup, then exit (no dict loading or network calls - for a startup toast)")
+	printConfig := flag.Bool("print-config", false, "print the effective settings after defaults and [lang] overrides are applied, then exit")
 	flag.Parse()
 
 	if *createTest {
@@ -446,6 +465,11 @@ func main() {
 
 	if *testDict != "" {
 		testDictFile(*testDict, cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.CardFormat)
+		return
+	}
+
+	if *printConfig {
+		printEffectiveConfig(cfg)
 		return
 	}
 
@@ -568,6 +592,34 @@ func main() {
 		if len(newSeen) > 0 {
 			appendMisses(g.seenPath, newSeen)
 		}
+	}
+}
+
+// printEffectiveConfig dumps the settings actually in force - after
+// defaults, the config file, and each [lang] section's overrides have been
+// merged - so "did my edit take effect?" can be answered without deploying
+// and watching the log. Companion to the warnings emitted while parsing:
+// those say what was rejected, this says what won.
+func printEffectiveConfig(cfg Config) {
+	fmt.Printf("dict_dir     %s\n", cfg.DictDir)
+	fmt.Printf("db           %s\n", cfg.DBPath)
+	fmt.Printf("out          %s\n", cfg.OutDir)
+	fmt.Printf("ca_cert      %s\n", cfg.CACertPath)
+	fmt.Printf("card_format  %q\n", cfg.CardFormat)
+	fmt.Printf("providers    %v\n", cfg.Providers)
+	fmt.Printf("chatgpt      model=%s temperature=%v max_tokens=%d max_alternatives=%d conf=%s\n",
+		cfg.ChatGPTModel, cfg.ChatGPTTemperature, cfg.ChatGPTMaxTokens, cfg.ChatGPTMaxAlternatives, cfg.ChatGPTConf)
+	fmt.Printf("lexicala     conf=%s\n", cfg.LexicalaConf)
+
+	fmt.Printf("\n%-8s %-10s %-9s %-9s %-15s %-13s %s\n",
+		"lang", "max_senses", "max_depth", "max_chars", "translation_tag", "dict_examples", "providers")
+	fmt.Printf("%-8s %-10d %-9d %-9d %-15q %-13v %v\n",
+		"(global)", cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.Providers)
+	for _, lang := range langList(cfg.Langs) {
+		rules := cfg.Langs[lang]
+		senses, depth, chars, tag, examples := effectiveLimits(cfg, rules)
+		fmt.Printf("%-8s %-10d %-9d %-9d %-15q %-13v %v\n",
+			lang, senses, depth, chars, tag, examples, effectiveProviders(cfg, rules))
 	}
 }
 
@@ -1348,35 +1400,32 @@ func appendMisses(path string, words []string) {
 
 // --- CSV export ---
 
+// exportCSV rewrites a deck in full (existing rows plus newly translated
+// ones). Written atomically for the same reason SaveCards is: this replaces
+// a deck that may already carry review history, and a half-written file
+// would lose it.
 func exportCSV(path string, existingRows [][]string, newTranslations []Translation) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	return core.WriteFileAtomic(path, 0644, func(f io.Writer) error {
+		w, err := core.NewSpreadsheetCSVWriter(f)
+		if err != nil {
+			return err
+		}
+		w.Write([]string{"front", "back", "due", "stability", "difficulty",
+			"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
 
-	w, err := core.NewSpreadsheetCSVWriter(f)
-	if err != nil {
-		return err
-	}
-	defer w.Flush()
-	w.Write([]string{"front", "back", "due", "stability", "difficulty",
-		"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
+		// Preserve existing rows (already normalized to 11-col by readExistingCSV)
+		for _, row := range existingRows {
+			w.Write(row)
+		}
 
-	// Preserve existing rows (already normalized to 11-col by readExistingCSV)
-	for _, row := range existingRows {
-		w.Write(row)
-	}
+		// Append new translations as New cards (state=0)
+		for _, t := range newTranslations {
+			w.Write([]string{t.Word, t.Translation, "", "0", "0", "0", "0", "0", "0", "0", ""})
+		}
 
-	// Append new translations as New cards (state=0)
-	for _, t := range newTranslations {
-		w.Write([]string{t.Word, t.Translation, "", "0", "0", "0", "0", "0", "0", "0", ""})
-	}
-
-	return w.Error()
+		w.Flush()
+		return w.Error()
+	})
 }
 
 func readExistingCSV(path string) (map[string][]string, [][]string) {

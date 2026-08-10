@@ -402,9 +402,11 @@ func computeLayout() {
 func loadConfig() {
 	paths := []string{"./anki-fbink.conf", filepath.Join(dataDir, "anki-fbink.conf")}
 	var data []byte
+	var confPath string
 	for _, p := range paths {
 		var err error
 		if data, err = os.ReadFile(p); err == nil {
+			confPath = p
 			break
 		}
 	}
@@ -412,9 +414,13 @@ func loadConfig() {
 		return
 	}
 
+	warn := core.NewConfigWarnings(confPath)
+	defer warn.Summary()
+
 	var override *StyleOverride // nil while parsing global (pre-section) keys
 
-	for _, line := range strings.Split(string(data), "\n") {
+	for i, line := range strings.Split(string(data), "\n") {
+		lineNo := i + 1
 		line = strings.TrimSpace(line)
 		if line == "" || line[0] == '#' {
 			continue
@@ -434,7 +440,7 @@ func loadConfig() {
 		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 
 		if override != nil {
-			applyStyleKey(override, key, value)
+			applyStyleKey(override, key, value, lineNo, warn)
 			continue
 		}
 
@@ -460,31 +466,35 @@ func loadConfig() {
 		case "font_menu_italic":
 			cfg.FontMenuItalic = value
 		case "size_title":
-			if v, err := strconv.Atoi(value); err == nil {
+			if v, ok := warn.Int(lineNo, key, value); ok {
 				cfg.SizeTitle = v
 			}
 		case "size_card":
-			if v, err := strconv.Atoi(value); err == nil {
+			if v, ok := warn.Int(lineNo, key, value); ok {
 				cfg.SizeCard = v
 			}
 		case "size_menu":
-			if v, err := strconv.Atoi(value); err == nil {
+			if v, ok := warn.Int(lineNo, key, value); ok {
 				cfg.SizeMenu = v
 			}
 		case "line_height":
-			if v, err := strconv.ParseFloat(value, 64); err == nil {
+			if v, ok := warn.Float(lineNo, key, value); ok {
 				cfg.LineHeight = v
 			}
 		case "margin":
-			if v, err := strconv.Atoi(value); err == nil {
+			if v, ok := warn.Int(lineNo, key, value); ok {
 				cfg.Margin = v
 			}
 		case "darkmode":
-			cfg.DarkMode = value == "true" || value == "1"
+			if v, ok := warn.Bool(lineNo, key, value); ok {
+				cfg.DarkMode = v
+			}
 		case "touch_cooldown":
-			if v, err := strconv.Atoi(value); err == nil {
+			if v, ok := warn.Int(lineNo, key, value); ok {
 				touchCooldown = time.Duration(v) * time.Millisecond
 			}
+		default:
+			warn.UnknownKey(lineNo, key)
 		}
 	}
 
@@ -497,7 +507,7 @@ func loadConfig() {
 // display-relevant keys are recognized here (touch_cooldown etc. stay
 // global-only) - unrecognized keys are silently ignored, same as the
 // global switch above.
-func applyStyleKey(o *StyleOverride, key, value string) {
+func applyStyleKey(o *StyleOverride, key, value string, lineNo int, warn *core.ConfigWarnings) {
 	switch key {
 	case "font_dir":
 		o.FontDir = &value
@@ -520,28 +530,31 @@ func applyStyleKey(o *StyleOverride, key, value string) {
 	case "font_menu_italic":
 		o.FontMenuItalic = &value
 	case "size_title":
-		if v, err := strconv.Atoi(value); err == nil {
+		if v, ok := warn.Int(lineNo, key, value); ok {
 			o.SizeTitle = &v
 		}
 	case "size_card":
-		if v, err := strconv.Atoi(value); err == nil {
+		if v, ok := warn.Int(lineNo, key, value); ok {
 			o.SizeCard = &v
 		}
 	case "size_menu":
-		if v, err := strconv.Atoi(value); err == nil {
+		if v, ok := warn.Int(lineNo, key, value); ok {
 			o.SizeMenu = &v
 		}
 	case "line_height":
-		if v, err := strconv.ParseFloat(value, 64); err == nil {
+		if v, ok := warn.Float(lineNo, key, value); ok {
 			o.LineHeight = &v
 		}
 	case "margin":
-		if v, err := strconv.Atoi(value); err == nil {
+		if v, ok := warn.Int(lineNo, key, value); ok {
 			o.Margin = &v
 		}
 	case "darkmode":
-		v := value == "true" || value == "1"
-		o.DarkMode = &v
+		if v, ok := warn.Bool(lineNo, key, value); ok {
+			o.DarkMode = &v
+		}
+	default:
+		warn.UnknownKey(lineNo, key)
 	}
 }
 
