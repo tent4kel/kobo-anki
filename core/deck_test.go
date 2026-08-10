@@ -29,6 +29,27 @@ func TestNormalizeRowRejectsTooShort(t *testing.T) {
 	}
 }
 
+func TestNormalizeRowKeepsExistingSchedulingWhenWidening(t *testing.T) {
+	// A deck written before the id column existed is 11 wide. Widening it
+	// must keep its review history, not rebuild the row from front/back -
+	// an earlier version did the latter and would have silently reset every
+	// card to New.
+	old := []string{"huis", "Haus", "2026-01-01T00:00:00Z", "12.5", "3.1", "4", "5", "6", "7", "2", "2025-12-01T00:00:00Z"}
+	got, ok := NormalizeRow(old)
+	if !ok {
+		t.Fatal("ok = false")
+	}
+	if len(got) != DeckColumns {
+		t.Fatalf("width = %d, want %d", len(got), DeckColumns)
+	}
+	if got[ColStability] != "12.5" || got[ColReps] != "6" || got[ColState] != "2" {
+		t.Errorf("scheduling fields lost: %q", got)
+	}
+	if got[ColID] != "" {
+		t.Errorf("ColID = %q, want empty for a pre-id deck", got[ColID])
+	}
+}
+
 func TestNormalizeRowPreservesUnknownTrailingColumns(t *testing.T) {
 	// Columns are append-only; a row written by a future version with extra
 	// columns must survive a read/write cycle rather than being truncated.
@@ -91,7 +112,85 @@ func TestNewCardRowMatchesHeaderWidth(t *testing.T) {
 	if len(DeckHeader) != DeckColumns {
 		t.Fatalf("DeckHeader has %d columns, DeckColumns says %d", len(DeckHeader), DeckColumns)
 	}
-	if len(NewCardRow("a", "b")) != len(DeckHeader) {
+	if len(NewCardRow("id1", "a", "b")) != len(DeckHeader) {
 		t.Error("NewCardRow width does not match the header")
+	}
+}
+
+func TestCardKeyPrefersIDOverFront(t *testing.T) {
+	withID := Card{Front: "**ruim**\nwijd\n*een ruime kamer.*", ID: "ruim"}
+	if got := withID.Key(); got != "ruim" {
+		t.Errorf("Key() = %q, want the stable id", got)
+	}
+	// A hand-written or pre-id card has no id and keeps its old identity.
+	noID := Card{Front: "bonjour"}
+	if got := noID.Key(); got != "bonjour" {
+		t.Errorf("Key() = %q, want the front text as fallback", got)
+	}
+}
+
+func TestCardStaysFindableAfterItsFrontIsRerendered(t *testing.T) {
+	// The bug this column exists to fix: a card re-rendered by a different
+	// provider, or after a card_format change, used to become unfindable -
+	// its review history was orphaned and the word re-added as a duplicate.
+	p := filepath.Join(t.TempDir(), "d.csv")
+	original := []Card{{ID: "ruim", Front: "**ruim**\nwijd", Back: "**weit**", Reps: 7}}
+	if err := SaveCards(p, original); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadCards(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a re-render: same card, completely different front text.
+	loaded[0].Front = "**ruim**\nwijd, breed, ruimtelijk\n*een ruime kamer.*"
+	if err := SaveCards(p, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := LoadCards(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := FindCard(reloaded, "ruim")
+	if found == nil {
+		t.Fatal("card not findable by id after its front changed")
+	}
+	if found.Reps != 7 {
+		t.Errorf("Reps = %d, want 7 - review history was lost", found.Reps)
+	}
+}
+
+func TestHandWrittenTwoColumnDeckStillWorks(t *testing.T) {
+	// The constraint that keeps a leading id column off the table: a plain
+	// front,back file must load as cards, be findable, and survive a save.
+	p := filepath.Join(t.TempDir(), "hand.csv")
+	os.WriteFile(p, []byte("front,back\nbonjour,hello\nmerci,thank you\n"), 0644)
+
+	cards, err := LoadCards(p)
+	if err != nil {
+		t.Fatalf("LoadCards: %v", err)
+	}
+	if len(cards) != 2 {
+		t.Fatalf("got %d cards, want 2", len(cards))
+	}
+	if cards[0].Front != "bonjour" || cards[0].Back != "hello" {
+		t.Errorf("first card = %q/%q", cards[0].Front, cards[0].Back)
+	}
+	if cards[0].ID != "" {
+		t.Errorf("ID = %q, want empty for a hand-written deck", cards[0].ID)
+	}
+	if FindCard(cards, "bonjour") == nil {
+		t.Error("hand-written card not findable by its front text")
+	}
+
+	// Round-trip: saving gains the full schema without inventing an id.
+	if err := SaveCards(p, cards); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := LoadCards(p)
+	if len(again) != 2 || again[0].Front != "bonjour" || again[0].ID != "" {
+		t.Errorf("round-trip changed a hand-written deck: %+v", again)
 	}
 }

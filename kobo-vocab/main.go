@@ -129,6 +129,12 @@ type VocabWord struct {
 }
 
 type Translation struct {
+	// SourceWord is the word as it appears in the Kobo vocabulary list,
+	// lowercased. It becomes the card's stable id (core.ColID), which is
+	// what makes a card findable again after its rendered faces change -
+	// Word below is display text and can be re-rendered at any time.
+	SourceWord string
+
 	Word, Translation, FromLang, ToLang, Source string
 }
 
@@ -362,7 +368,6 @@ type langGroup struct {
 	existing         map[string][]string // existing CSV rows keyed by word
 	existingRows     [][]string          // existing CSV rows in order
 	newWords         []VocabWord
-	seenPath         string // vocab-seen-*.txt for this pair - see readSeenWords
 }
 
 // computeGroups reads the Kobo word list, groups it by language pair, and
@@ -401,16 +406,12 @@ func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, to
 
 		existing, existingRows := readExistingCSV(csvPath)
 		misses := readMisses(missesPath)
-		// existing keys the CSV's front column against the raw Kobo word,
-		// which only still matches once a provider starts overriding
-		// Entry.Front with styled card content (dict_examples, lexicala,
-		// chatgpt) instead of leaving it as the plain word - e.g. front
-		// becomes "**afspraak**\nmet iemand..." while the Kobo word list
-		// still says "afspraak", so the CSV check alone stopped matching
-		// and every such word looked "new" again on every run, duplicating
-		// it. seen tracks the raw word independently of card content -
-		// see readMisses/appendMisses below main(), reused as-is (a plain
-		// word-list file, nothing miss-specific about the implementation).
+		// vocab-seen-*.txt is legacy: it exists for decks written before the
+		// id column, whose rows can only be matched by their (re-renderable)
+		// front text. Rows written since carry the source word in
+		// core.ColID, which readExistingCSV keys on directly, so nothing new
+		// is added to this file - it is only still read so an older deck
+		// doesn't get every word re-added as a duplicate.
 		seen := readMisses(seenPath)
 
 		var newWords []VocabWord
@@ -428,7 +429,7 @@ func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, to
 			newWords = append(newWords, w)
 		}
 
-		groups[suffix] = &langGroup{fromLang, toLang, existing, existingRows, newWords, seenPath}
+		groups[suffix] = &langGroup{fromLang, toLang, existing, existingRows, newWords}
 		if len(newWords) > 0 {
 			totalNew += len(newWords)
 			log.Printf("%s→%s: %d new words to translate", fromLang, toLang, len(newWords))
@@ -546,7 +547,6 @@ func main() {
 
 		var newTranslations []Translation
 		var newMisses []string
-		var newSeen []string
 
 		for _, w := range g.newWords {
 			entry, err := chain.Lookup(w.Text, g.fromLang, g.toLang)
@@ -564,9 +564,15 @@ func main() {
 			if entry.Example != "" {
 				def += "\n\n*" + entry.Example + "*"
 			}
-			t := Translation{front, def, g.fromLang, g.toLang, entry.Source}
+			t := Translation{
+				SourceWord:  strings.ToLower(w.Text),
+				Word:        front,
+				Translation: def,
+				FromLang:    g.fromLang,
+				ToLang:      g.toLang,
+				Source:      entry.Source,
+			}
 			newTranslations = append(newTranslations, t)
-			newSeen = append(newSeen, strings.ToLower(w.Text))
 			fmt.Printf("  [%-10s] %s → %s\n", entry.Source, w.Text, entry.Definition)
 		}
 
@@ -584,13 +590,6 @@ func main() {
 		if len(newMisses) > 0 {
 			missesPath := filepath.Join(cfg.OutDir, fmt.Sprintf("vocab-misses-%s-%s.txt", g.fromLang, g.toLang))
 			appendMisses(missesPath, newMisses)
-		}
-
-		// Save seen (raw Kobo words that got a real translation) - see the
-		// comment in computeGroups on why this can't just be the CSV's
-		// front column anymore.
-		if len(newSeen) > 0 {
-			appendMisses(g.seenPath, newSeen)
 		}
 	}
 }
@@ -1418,7 +1417,7 @@ func exportCSV(path string, existingRows [][]string, newTranslations []Translati
 		}
 
 		for _, t := range newTranslations {
-			w.Write(core.NewCardRow(t.Word, t.Translation))
+			w.Write(core.NewCardRow(t.SourceWord, t.Word, t.Translation))
 		}
 
 		w.Flush()
@@ -1426,6 +1425,15 @@ func exportCSV(path string, existingRows [][]string, newTranslations []Translati
 	})
 }
 
+// readExistingCSV returns a deck's rows, and an index of them keyed by the
+// word each card came from.
+//
+// The key is the row's id column when it has one - the source word, written
+// by exportCSV - and falls back to its front text otherwise, which is all a
+// deck written before that column (or a hand-written one) can offer. The
+// fallback is why vocab-seen-*.txt is still consulted in computeGroups: for
+// those older rows the front may since have been re-rendered into something
+// that no longer resembles the word at all.
 func readExistingCSV(path string) (map[string][]string, [][]string) {
 	byWord := make(map[string][]string)
 	var rows [][]string
@@ -1448,7 +1456,11 @@ func readExistingCSV(path string) (map[string][]string, [][]string) {
 		if !ok {
 			continue
 		}
-		byWord[strings.ToLower(normalized[core.ColFront])] = normalized
+		key := normalized[core.ColID]
+		if key == "" {
+			key = normalized[core.ColFront]
+		}
+		byWord[strings.ToLower(key)] = normalized
 		rows = append(rows, normalized)
 	}
 	return byWord, rows

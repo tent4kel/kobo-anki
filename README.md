@@ -216,19 +216,30 @@ word the dictionary happens to illustrate.
 
 ## Flashcard CSV format
 
-Cards are stored as CSV with 11 columns (FSRS format):
+Cards are stored as CSV with 12 columns (FSRS scheduling plus a card id):
 
 ```
-front,back,due,stability,difficulty,elapsed_days,scheduled_days,reps,lapses,state,last_review
-hello,bonjour,2025-01-01,0,0,0,0,0,0,0,
+front,back,due,stability,difficulty,elapsed_days,scheduled_days,reps,lapses,state,last_review,id
+hello,bonjour,2025-01-01,0,0,0,0,0,0,0,,hello
 ```
 
-New cards can use a minimal 2-column format — the app adds FSRS fields on first review:
+`id` identifies the card independently of how its faces are rendered — kobo-vocab fills it
+with the word it looked up. Without it, a card's identity was its front text, so re-running
+the extractor after a `card_format` change (or with a different provider answering) produced
+a front that no longer matched, orphaning the review history and re-adding the word as a
+duplicate. It is deliberately the **last** column, so a two-column file is never mistaken for
+`id,front`. Cards without an id fall back to matching on their front text, exactly as before.
+
+Hand-written decks can use a minimal 2-column format — the app fills in the remaining columns
+on first save, and these cards keep working exactly as before:
 
 ```
 hello,bonjour
 merci,thank you
 ```
+
+Any number of columns in between works too: a deck written by an earlier version keeps its
+review history when the missing columns are filled in.
 
 `french.csv` in the repo root is a small ready-to-use sample deck — copy it into your
 `words/` directory to try the app before setting up any dictionaries.

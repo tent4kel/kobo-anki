@@ -1100,7 +1100,7 @@ func drawDoneScreen() {
 // ============================================================
 
 func rateAndAdvance(rating fsrs.Rating) Screen {
-	card := core.FindCard(cards, currentCard.Front)
+	card := core.FindCard(cards, currentCard.Key())
 	if card != nil {
 		core.Review(card, rating)
 		core.SaveCards(csvFile, cards)

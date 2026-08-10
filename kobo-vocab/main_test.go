@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"kobo-anki/core"
 )
 
 // writeTestDictZip builds a minimal single-file dicthtml-*.zip containing
@@ -662,5 +664,69 @@ func TestLoadConfigDoesNotWarnAboutAutoParse(t *testing.T) {
 
 	if strings.Contains(buf.String(), "auto_parse") {
 		t.Errorf("auto_parse was reported as unknown:\n%s", buf.String())
+	}
+}
+
+func TestComputeGroupsUsesIDColumnInsteadOfSeenFile(t *testing.T) {
+	// The duplicate-word bug, now solved by the id column rather than the
+	// vocab-seen sidecar: a card whose rendered front looks nothing like the
+	// source word is still recognized as already-done, with no
+	// vocab-seen-*.txt present at all.
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
+	createTestDB(dbPath)
+
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	defer db.Close()
+
+	cfg := loadConfig("")
+	cfg.OutDir = t.TempDir()
+
+	csvPath := filepath.Join(cfg.OutDir, "vocab-nl-en.csv")
+	exportCSV(csvPath, nil, []Translation{{
+		SourceWord:  "behoefte",
+		Word:        "**behoefte**\nnood\n*een dringende behoefte.*",
+		Translation: "**need**\nrequirement",
+	}})
+
+	if _, err := os.Stat(filepath.Join(cfg.OutDir, "vocab-seen-nl-en.txt")); !os.IsNotExist(err) {
+		t.Fatal("vocab-seen file should not be written any more")
+	}
+
+	groups, totalNew, err := computeGroups(cfg, db)
+	if err != nil {
+		t.Fatalf("computeGroups: %v", err)
+	}
+	if totalNew != 14 {
+		t.Errorf("totalNew = %d, want 14 (15 - 1 already in the deck)", totalNew)
+	}
+	for _, w := range groups["-nl-en"].newWords {
+		if strings.ToLower(w.Text) == "behoefte" {
+			t.Error("behoefte re-offered as new despite its id being in the deck")
+		}
+	}
+}
+
+func TestExportCSVWritesSourceWordAsID(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "d.csv")
+	if err := exportCSV(p, nil, []Translation{{
+		SourceWord: "liepen", Word: "**lopen**", Translation: "**laufen**",
+	}}); err != nil {
+		t.Fatalf("exportCSV: %v", err)
+	}
+	cards, err := core.LoadCards(p)
+	if err != nil {
+		t.Fatalf("LoadCards: %v", err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("got %d cards, want 1", len(cards))
+	}
+	if cards[0].ID != "liepen" {
+		t.Errorf("ID = %q, want the source word", cards[0].ID)
+	}
+	if cards[0].Key() != "liepen" {
+		t.Errorf("Key() = %q, want the source word", cards[0].Key())
 	}
 }

@@ -36,7 +36,7 @@ type studyData struct {
 	FrontHeadwordHTML template.HTML
 	BackHTML          template.HTML
 	Deck              string
-	Key               string // original card.Front for URL lookups
+	Key               string // card.Key() - stable id when present, else the front text
 	Reverse           bool
 }
 
@@ -119,12 +119,12 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	if reverse {
 		display.Front, display.Back = display.Back, display.Front
 	}
-	tmpl.ExecuteTemplate(w, "front", newStudyData(&display, deck, card.Front, reverse))
+	tmpl.ExecuteTemplate(w, "front", newStudyData(&display, deck, card.Key(), reverse))
 }
 
 func backHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	front := r.URL.Query().Get("front") // always the original card.Front
+	front := r.URL.Query().Get("front") // card.Key(), named "front" for URL compatibility
 	deck := r.URL.Query().Get("deck")
 	reverse := r.URL.Query().Get("reverse") == "1"
 
@@ -145,7 +145,7 @@ func backHandler(w http.ResponseWriter, r *http.Request) {
 	if reverse {
 		display.Front, display.Back = display.Back, display.Front
 	}
-	tmpl.ExecuteTemplate(w, "back", newStudyData(&display, deck, card.Front, reverse))
+	tmpl.ExecuteTemplate(w, "back", newStudyData(&display, deck, card.Key(), reverse))
 }
 
 func rateHandler(w http.ResponseWriter, r *http.Request) {

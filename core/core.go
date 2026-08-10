@@ -86,8 +86,15 @@ func InitScheduler(retention float64, maxInterval float64, shortTerm bool) {
 }
 
 type Card struct {
-	Front         string
-	Back          string
+	Front string
+	Back  string
+
+	// ID identifies the card independently of how its faces are rendered.
+	// kobo-vocab sets it to the word it looked up; hand-written decks and
+	// decks predating the column leave it empty. Use Key, not this field
+	// directly, to look a card up.
+	ID string
+
 	Due           time.Time
 	Stability     float64
 	Difficulty    float64
@@ -97,6 +104,22 @@ type Card struct {
 	Lapses        uint64
 	State         fsrs.State
 	LastReview    time.Time
+}
+
+// Key is the card's lookup identity: its ID when it has one, otherwise its
+// front text.
+//
+// The front text alone used to be the identity everywhere, which quietly
+// broke once providers started rendering fronts as full cards - the same
+// word would produce a different front after a card_format change or a
+// different provider answering, so its review history was orphaned and the
+// word re-added as a duplicate. Falling back to Front keeps hand-written
+// two-column decks working exactly as before.
+func (c *Card) Key() string {
+	if c.ID != "" {
+		return c.ID
+	}
+	return c.Front
 }
 
 var scheduler = fsrs.NewFSRS(fsrs.DefaultParam())
@@ -182,6 +205,7 @@ func LoadCards(csvFile string) ([]Card, error) {
 		c := Card{
 			Front:      normalized[ColFront],
 			Back:       normalized[ColBack],
+			ID:         normalized[ColID],
 			Due:        parseTime(normalized[ColDue]),
 			LastReview: parseTime(normalized[ColLastReview]),
 		}
@@ -222,6 +246,7 @@ func SaveCards(csvFile string, cards []Card) error {
 				strconv.FormatUint(c.Lapses, 10),
 				strconv.Itoa(int(c.State)),
 				formatTime(c.LastReview),
+				c.ID,
 			})
 		}
 		w.Flush()
@@ -229,9 +254,11 @@ func SaveCards(csvFile string, cards []Card) error {
 	})
 }
 
-func FindCard(cards []Card, front string) *Card {
+// FindCard looks a card up by its Key (see Card.Key) - its id when it has
+// one, otherwise its front text.
+func FindCard(cards []Card, key string) *Card {
 	for i := range cards {
-		if cards[i].Front == front {
+		if cards[i].Key() == key {
 			return &cards[i]
 		}
 	}
