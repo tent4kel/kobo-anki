@@ -1410,17 +1410,15 @@ func exportCSV(path string, existingRows [][]string, newTranslations []Translati
 		if err != nil {
 			return err
 		}
-		w.Write([]string{"front", "back", "due", "stability", "difficulty",
-			"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
+		w.Write(core.DeckHeader)
 
-		// Preserve existing rows (already normalized to 11-col by readExistingCSV)
+		// Preserve existing rows (already widened by readExistingCSV)
 		for _, row := range existingRows {
 			w.Write(row)
 		}
 
-		// Append new translations as New cards (state=0)
 		for _, t := range newTranslations {
-			w.Write([]string{t.Word, t.Translation, "", "0", "0", "0", "0", "0", "0", "0", ""})
+			w.Write(core.NewCardRow(t.Word, t.Translation))
 		}
 
 		w.Flush()
@@ -1443,20 +1441,15 @@ func readExistingCSV(path string) (map[string][]string, [][]string) {
 		return byWord, rows
 	}
 	for i, row := range allRows {
-		if i == 0 || len(row) < 2 {
+		if i == 0 {
+			continue // header
+		}
+		normalized, ok := core.NormalizeRow(row)
+		if !ok {
 			continue
 		}
-		// Normalize old 6-col (SM-2) rows to 11-col (FSRS)
-		if len(row) < 11 {
-			normalized := make([]string, 11)
-			normalized[0] = row[0] // front
-			normalized[1] = row[1] // back
-			// due, stability, difficulty, elapsed_days, scheduled_days, reps, lapses = zero
-			normalized[9] = "0" // state = New
-			row = normalized
-		}
-		byWord[strings.ToLower(row[0])] = row
-		rows = append(rows, row)
+		byWord[strings.ToLower(normalized[core.ColFront])] = normalized
+		rows = append(rows, normalized)
 	}
 	return byWord, rows
 }

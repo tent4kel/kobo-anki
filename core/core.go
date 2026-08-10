@@ -170,29 +170,29 @@ func LoadCards(csvFile string) ([]Card, error) {
 
 	var cards []Card
 	for i, row := range rows {
-		if i == 0 || len(row) < 2 {
+		if i == 0 {
+			warnIfNotHeader(csvFile, row)
+			continue
+		}
+		normalized, ok := NormalizeRow(row)
+		if !ok {
 			continue
 		}
 
 		c := Card{
-			Front: row[0],
-			Back:  row[1],
-			State: fsrs.New,
+			Front:      normalized[ColFront],
+			Back:       normalized[ColBack],
+			Due:        parseTime(normalized[ColDue]),
+			LastReview: parseTime(normalized[ColLastReview]),
 		}
-
-		if len(row) >= 11 {
-			// FSRS format: front,back,due,stability,difficulty,elapsed_days,scheduled_days,reps,lapses,state,last_review
-			c.Due = parseTime(row[2])
-			c.Stability, _ = strconv.ParseFloat(row[3], 64)
-			c.Difficulty, _ = strconv.ParseFloat(row[4], 64)
-			c.ElapsedDays, _ = strconv.ParseUint(row[5], 10, 64)
-			c.ScheduledDays, _ = strconv.ParseUint(row[6], 10, 64)
-			c.Reps, _ = strconv.ParseUint(row[7], 10, 64)
-			c.Lapses, _ = strconv.ParseUint(row[8], 10, 64)
-			state, _ := strconv.Atoi(row[9])
-			c.State = fsrs.State(state)
-			c.LastReview = parseTime(row[10])
-		}
+		c.Stability, _ = strconv.ParseFloat(normalized[ColStability], 64)
+		c.Difficulty, _ = strconv.ParseFloat(normalized[ColDifficulty], 64)
+		c.ElapsedDays, _ = strconv.ParseUint(normalized[ColElapsedDays], 10, 64)
+		c.ScheduledDays, _ = strconv.ParseUint(normalized[ColScheduledDays], 10, 64)
+		c.Reps, _ = strconv.ParseUint(normalized[ColReps], 10, 64)
+		c.Lapses, _ = strconv.ParseUint(normalized[ColLapses], 10, 64)
+		state, _ := strconv.Atoi(normalized[ColState])
+		c.State = fsrs.State(state)
 
 		cards = append(cards, c)
 	}
@@ -209,8 +209,7 @@ func SaveCards(csvFile string, cards []Card) error {
 			return err
 		}
 
-		w.Write([]string{"front", "back", "due", "stability", "difficulty",
-			"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review"})
+		w.Write(DeckHeader)
 		for _, c := range cards {
 			w.Write([]string{
 				c.Front, c.Back,

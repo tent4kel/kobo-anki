@@ -175,30 +175,6 @@ func (b wrappedBlock) draw(r Rect, gray uint8, align Align, centerV bool) {
 	drawLines(canvas, b.lines, target, b.resolve, gray, b.lineHeight, b.ascent, align)
 }
 
-// headwordOnly extracts just the leading **bold** run from formatted card
-// Markdown, discarding alternatives/example - used for the small gray
-// "front repeated" label on the back screen (see drawBackScreen), which is
-// meant to remind the reader which word this card is about, not restate
-// the whole front face (kobo-vocab's card_format puts the headword there
-// first, as **bold**). Falls back to the full string unchanged if it
-// doesn't start with a bold run - e.g. a custom card_format that doesn't
-// bold the headword, or leads with something else - so an unexpected shape
-// still shows something rather than going blank.
-func headwordOnly(md string) string {
-	words := markdownToWords([]byte(md))
-	var out []string
-	for _, w := range words {
-		if w.text == "\n" || w.style != StyleBold {
-			break
-		}
-		out = append(out, w.text)
-	}
-	if len(out) == 0 {
-		return md
-	}
-	return "**" + strings.Join(out, " ") + "**"
-}
-
 // drawMarkdownLabel wraps and draws Markdown-formatted card content
 // (bold/italic/lists/line breaks) in one call - the common case of a
 // single independent block. If centerV, it's vertically centered within r

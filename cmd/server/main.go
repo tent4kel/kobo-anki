@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -54,29 +53,11 @@ func renderMD(s string) template.HTML {
 	return template.HTML(buf.String())
 }
 
-// leadingBoldRe matches a **bold** run anchored at the very start of a
-// card_format-built string - kobo-vocab always puts the headword there
-// first when it's present at all.
-var leadingBoldRe = regexp.MustCompile(`(?s)^\*\*(.+?)\*\*`)
-
-// headwordOnly extracts just the leading **bold** headword from card
-// Markdown, discarding alternatives/example - mirrors cmd/fbink's function
-// of the same name/purpose. Falls back to the full string unchanged if it
-// doesn't start with a bold run (e.g. a custom card_format that doesn't
-// bold the headword), so an unexpected shape still shows something.
-func headwordOnly(s string) string {
-	m := leadingBoldRe.FindStringSubmatch(s)
-	if m == nil {
-		return s
-	}
-	return "**" + m[1] + "**"
-}
-
 func newStudyData(display *core.Card, deck, key string, reverse bool) studyData {
 	return studyData{
 		Card:              display,
 		FrontHTML:         renderMD(display.Front),
-		FrontHeadwordHTML: renderMD(headwordOnly(display.Front)),
+		FrontHeadwordHTML: renderMD(core.HeadwordOnly(display.Front)),
 		BackHTML:          renderMD(display.Back),
 		Deck:              deck,
 		Key:               key,

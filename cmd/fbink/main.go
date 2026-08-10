@@ -1044,7 +1044,7 @@ func drawBackScreen() {
 		frontLineHeight = scaledLineHeight(regular.Face)
 	}
 	frontRect := Rect{cardRect.X, cardRect.Y, cardRect.W, frontLineHeight * 2}
-	drawMarkdownLabel(frontRect, headwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
+	drawMarkdownLabel(frontRect, core.HeadwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
 
 	// Answer text — this rect is itself fixed (anchored right below the
 	// fixed frontRect), so centering within it can't cause any jumping;

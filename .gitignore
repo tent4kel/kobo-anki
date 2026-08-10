@@ -4,10 +4,13 @@ kobo-anki
 kobo-anki-fbink
 kobo-anki-server
 kobo-vocab/kobo-vocab
-# `go build ./...` drops a binary named after each main package into its own
-# directory - catch those so they can't be committed by accident
+# `go build ./...` drops a binary named after each main package, either in
+# the package directory or the cwd it was run from - catch both so they
+# can't be committed by accident
 cmd/fbink/fbink
 cmd/server/server
+/fbink
+/server
 
 # Deployment zips
 *.zip
