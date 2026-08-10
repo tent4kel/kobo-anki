@@ -41,36 +41,10 @@ You also need the `fbink` binary. Download the Kobo build from [FBInk releases](
 First copy the `.example` config files and rename them (remove `.example`), then edit to match
 your setup.
 
-### Deploying over FTP (recommended)
-
-`deploy-ftp.sh` builds the ARM binaries and pushes everything to a Kobo over plain FTP, which
-is all the stock Kobo FTP server supports. Create `deploy.conf` (see `deploy.conf.example`,
-gitignored) so you don't retype the connection details:
-
-```sh
-KOBO_HOST=192.168.1.50
-KOBO_PORT=1021
-KOBO_USER=root
-KOBO_FOLDER=kobo-anki
-```
-
-Then:
-
-```sh
-./deploy-ftp.sh                    # uses deploy.conf
-./deploy-ftp.sh 192.168.1.50       # or pass the host directly
-```
-
-It never touches `words/` (your review progress) or on-device logs — only the files that ship
-with the app — so it's safe to re-run as often as you like.
-
-### Resulting layout on the device
-
-Both the FTP script and a manual USB/SCP copy end up with this, under
-`/mnt/onboard/.adds/<KOBO_FOLDER>/kobo-anki/`:
+Then connect the Kobo over USB and copy the files into `.adds/`, giving you this layout:
 
 ```
-/mnt/onboard/.adds/kobo-anki/kobo-anki/
+/mnt/onboard/.adds/kobo-anki/
 ├── bin/
 │   ├── kobo-anki-fbink
 │   ├── kobo-anki-server
@@ -88,16 +62,38 @@ Both the FTP script and a manual USB/SCP copy end up with this, under
 └── words/                  ← flashcard CSVs go here
 ```
 
-Setting `KOBO_FOLDER=kobo-anki-beta` gives you a second, independent install alongside a
-stable one — handy for testing a build without disturbing your daily decks.
-
 ### NickelMenu config
 
-Add to `/mnt/onboard/.adds/nm/config`, matching the folder you deployed to:
+Add to `/mnt/onboard/.adds/nm/config`:
 
 ```
-menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/kobo-anki/start.sh
+menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
 ```
+
+### Deploying over FTP (for development)
+
+Unplugging and replugging USB for every change gets old fast. `deploy-ftp.sh` rebuilds the ARM
+binaries and pushes them over plain FTP instead — all the stock Kobo FTP server supports — so
+you can iterate without touching the cable. Put the connection details in `deploy.conf` (see
+`deploy.conf.example`, gitignored):
+
+```sh
+KOBO_HOST=192.168.1.50
+KOBO_PORT=1021
+KOBO_USER=root
+KOBO_FOLDER=kobo-anki-beta
+```
+
+```sh
+./deploy-ftp.sh                    # uses deploy.conf
+./deploy-ftp.sh 192.168.1.50       # or pass the host directly
+```
+
+It never touches `words/` (your review progress) or on-device logs, so it's safe to re-run as
+often as you like. Note it uploads into `.adds/<KOBO_FOLDER>/kobo-anki/` — a level deeper than
+the USB layout above — so a `KOBO_FOLDER` like `kobo-anki-beta` gives you a test install
+sitting alongside your real one, with its own NickelMenu entry pointing at
+`/mnt/onboard/.adds/kobo-anki-beta/kobo-anki/start.sh`.
 
 ## Configuration
 
