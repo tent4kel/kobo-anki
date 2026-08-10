@@ -33,6 +33,7 @@ type Config struct {
 	MaxDepth       int      // max direct-child <div> blocks to keep per sense (drops examples etc.); 0 = unlimited
 	MaxChars       int      // max characters of definition text per word; 0 = unlimited
 	TranslationTag string   // if set (e.g. "b"), nested-format entries keep only this tag's spans, comma-joined; "" = keep full formatted text. No effect on flat-format entries - see extractEntry.
+	StripLabels    []string // annotation classes (gen/gram/reg/dom/geo) to remove from card text - see dict_strip_labels and CLASSES.md in the dict source
 	DictExamples   bool     // if true, nested-format entries try to build a ChatGPT/Lexicala-style card (bold headword + alternatives + one example, on both Front and Definition) from the dict's own example phrases. Verified against dicthtml-nl-de.zip only - see extractCardEntry. No effect without TranslationTag also set, and no effect on flat-format entries.
 	Providers      []string // content providers to try in order, e.g. []string{"dict", "lexicala"} - see provider.go
 	LexicalaConf   string   // path to Lexicala credentials JSON (base_url/token), only read if "lexicala" is in Providers
@@ -160,6 +161,10 @@ func loadConfig(path string) Config {
 		LexicalaConf: "APIs/lexicala.json",
 		CardFormat:   DefaultCardFormat,
 		CACertPath:   "cacert.pem",
+		// Gender and grammar markers - "(der)", "(4e naamval)" - are noise
+		// on a flashcard. Register, subject-field and regional markers say
+		// something about when the word is used, so they are kept.
+		StripLabels: []string{"gen", "gram"},
 
 		ChatGPTConf: "APIs/chatgpt.json",
 		// gpt-4o-mini/0.3/400/3 are a cheap, fairly deterministic default -
@@ -286,6 +291,8 @@ func loadConfig(path string) Config {
 				if v, ok := warn.Bool(lineNo, key, val); ok {
 					cfg.DictExamples = v
 				}
+			case "dict_strip_labels":
+				cfg.StripLabels = splitProviders(val)
 			case "card_format":
 				cfg.CardFormat = val
 			case "providers":
@@ -368,6 +375,23 @@ func loadConfig(path string) Config {
 	}
 
 	return cfg
+}
+
+// labelSet turns a dict_strip_labels list into a lookup set, ignoring any
+// class name the dict pipeline doesn't emit so a typo can't silently strip
+// something unintended.
+func labelSet(names []string) map[string]bool {
+	known := map[string]bool{"gen": true, "gram": true, "reg": true, "dom": true, "geo": true}
+	out := map[string]bool{}
+	for _, n := range names {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if known[n] {
+			out[n] = true
+		} else if n != "" {
+			log.Printf("dict_strip_labels: unknown annotation class %q - ignored (want gen, gram, reg, dom or geo)", n)
+		}
+	}
+	return out
 }
 
 // splitProviders parses a comma-separated providers= value into a trimmed,
@@ -486,7 +510,7 @@ func main() {
 	}
 
 	if *testDict != "" {
-		testDictFile(*testDict, cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.CardFormat)
+		testDictFile(*testDict, cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.CardFormat, cfg.StripLabels)
 		return
 	}
 
@@ -549,7 +573,7 @@ func main() {
 			dict = dictCache[suffix]
 			if dict == nil {
 				path := filepath.Join(cfg.DictDir, "dicthtml"+suffix+".zip")
-				if parsed, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, cardFormat); err != nil {
+				if parsed, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, cardFormat, labelSet(cfg.StripLabels)); err != nil {
 					log.Printf("No dictionary for suffix %s (dicthtml%s.zip): %v", suffix, suffix, err)
 				} else {
 					if len(parsed.Entries) == 0 {
@@ -816,8 +840,8 @@ const brSentinel = "\x00BR\x00"
 
 // testDictFile parses a single dict zip and prints diagnostics, for checking
 // whether a dictionary is supported before deploying it to the Kobo.
-func testDictFile(path string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat string) {
-	dict, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, compileCardFormatOrDefault(cardFormat))
+func testDictFile(path string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat string, stripLabels []string) {
+	dict, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, compileCardFormatOrDefault(cardFormat), labelSet(stripLabels))
 	if err != nil {
 		log.Fatalf("Failed to parse %s: %v", path, err)
 	}
@@ -840,7 +864,7 @@ func testDictFile(path string, maxSenses, maxDepth, maxChars int, translationTag
 	}
 }
 
-func parseKoboDict(zipPath string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat cardTemplate) (*KoboDict, error) {
+func parseKoboDict(zipPath string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat cardTemplate, dropLabels map[string]bool) (*KoboDict, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return nil, err
@@ -889,7 +913,7 @@ func parseKoboDict(zipPath string, maxSenses, maxDepth, maxChars int, translatio
 		}
 
 		for _, block := range wordBlockRe.FindAllString(string(data), -1) {
-			word, definition, front, ok := extractEntry(block, maxSenses, maxDepth, maxChars, tagRe, dictExamples, cardFormat)
+			word, definition, front, ok := extractEntry(block, maxSenses, maxDepth, maxChars, tagRe, dictExamples, cardFormat, dropLabels)
 			if !ok {
 				continue
 			}
@@ -942,7 +966,7 @@ func parseKoboDict(zipPath string, maxSenses, maxDepth, maxChars int, translatio
 // whenever extractCardEntry finds nothing usable (e.g. no bold match in the
 // first sense), so a word without a matching translation doesn't silently
 // go blank.
-func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp.Regexp, wantExamples bool, cardFormat cardTemplate) (word, definition, front string, ok bool) {
+func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp.Regexp, wantExamples bool, cardFormat cardTemplate, dropLabels map[string]bool) (word, definition, front string, ok bool) {
 	nameMatch := nameAttrRe.FindStringSubmatch(block)
 	if nameMatch == nil {
 		return "", "", "", false
@@ -951,7 +975,11 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 
 	if topSenses := topLevelLis(block); len(topSenses) > 0 {
 		if wantExamples && tagRe != nil {
-			if def, fr, cardOK := extractCardEntry(word, topSenses, tagRe, cardFormat); cardOK {
+			article := ""
+			if m := articleRe.FindStringSubmatch(block); m != nil {
+				article = strings.TrimSpace(m[1])
+			}
+			if def, fr, cardOK := extractCardEntry(word, topSenses, tagRe, cardFormat, dropLabels, article); cardOK {
 				def = truncateMarkdownVisible(def, maxChars)
 				fr = truncateMarkdownVisible(fr, maxChars)
 				return word, def, fr, true
@@ -1040,6 +1068,43 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 // deployed dicthtml-nl-de.zip.
 var exDivOpenRe = regexp.MustCompile(`<div\s+class="ex"[^>]*>`)
 
+// Class markers emitted by the dict source pipeline (extractor.py; see
+// CLASSES.md next to it). They make explicit what this parser previously had
+// to infer: which bold spans are real translations rather than bolded
+// grammar notes, and which half of an example is the target language.
+//
+// Every use is best-effort. A dictionary built from another source - the
+// nl-en one here, for instance - carries none of these, so each lookup falls
+// back to the older positional heuristic. "No class" always means "unknown",
+// never "absent".
+var (
+	trSpanRe     = regexp.MustCompile(`(?is)<b\s+class="tr"[^>]*>(.*?)</b\s*>`)
+	targetSpanRe = regexp.MustCompile(`(?is)<span\s+class="t"[^>]*>(.*?)</span\s*>`)
+
+	// The source-language article, salvaged from the entry's headword line -
+	// "(het)" for huis. Only nouns have one (35,623 of 102,272 entries).
+	articleRe = regexp.MustCompile(`(?is)<i\s+class="art"[^>]*>\((.*?)\)</i\s*>`)
+)
+
+// labelClassRe matches one classified annotation, capturing its class, so
+// unwanted ones can be dropped from card text - see dict_strip_labels.
+var labelClassRe = regexp.MustCompile(`(?is)<i\s+class="(gen|gram|reg|dom|geo)"[^>]*>.*?</i\s*>`)
+
+// stripLabelClasses removes annotations whose class is in drop. An empty
+// set leaves the markup untouched.
+func stripLabelClasses(htmlSrc string, drop map[string]bool) string {
+	if len(drop) == 0 {
+		return htmlSrc
+	}
+	return labelClassRe.ReplaceAllStringFunc(htmlSrc, func(m string) string {
+		sub := labelClassRe.FindStringSubmatch(m)
+		if sub != nil && drop[sub[1]] {
+			return ""
+		}
+		return m
+	})
+}
+
 // extractCardEntry tries to build a ChatGPT/Lexicala-style card - bold
 // headword + alternatives + one example, via the shared formatCard - purely
 // from the dict's own content, for the entry's first sense only (senses[0]
@@ -1061,36 +1126,65 @@ var exDivOpenRe = regexp.MustCompile(`<div\s+class="ex"[^>]*>`)
 // sense that's genuinely just usage notes) - the caller falls back to the
 // plain multi-sense extraction in that case, same as when tagRe finds
 // nothing in extractTagText.
-func extractCardEntry(word string, senses []string, tagRe *regexp.Regexp, cardFormat cardTemplate) (definition, front string, ok bool) {
-	senseDivs := topLevelDivs(senses[0])
+func extractCardEntry(word string, senses []string, tagRe *regexp.Regexp, cardFormat cardTemplate, dropLabels map[string]bool, article string) (definition, front string, ok bool) {
+	sense := stripLabelClasses(senses[0], dropLabels)
+
+	senseDivs := topLevelDivs(sense)
 	if len(senseDivs) == 0 {
-		senseDivs = []string{senses[0]}
+		senseDivs = []string{sense}
 	}
-	translations := extractTagList(senseDivs[0], tagRe)
+
+	// class="tr" marks genuine translations; tagRe (translation_tag) also
+	// catches bolded grammar notes - the nl-de "instorten" entry bolds a
+	// case-government marker, which used to land on the card. Prefer the
+	// class where the dictionary provides it.
+	translations := extractTagList(senseDivs[0], trSpanRe)
+	if len(translations) == 0 {
+		translations = extractTagList(senseDivs[0], tagRe)
+	}
 	if len(translations) == 0 {
 		return "", "", false
 	}
 
 	var sourceExample, targetExample string
-	if loc := exDivOpenRe.FindStringIndex(senses[0]); loc != nil {
-		if exDivs := topLevelDivs(senses[0][loc[0]:]); len(exDivs) > 0 {
+	if loc := exDivOpenRe.FindStringIndex(sense); loc != nil {
+		if exDivs := topLevelDivs(sense[loc[0]:]); len(exDivs) > 0 {
 			if ex := liRe.FindStringSubmatch(exDivs[0]); ex != nil {
 				sourceExample, targetExample = splitExample(ex[1])
 			}
 		}
 	}
 
+	// The article belongs with the source-language headword - a learner needs
+	// "het huis", not "huis". It is deliberately not stripped by
+	// dict_strip_labels: that setting governs annotations *within* an entry,
+	// and this one has been promoted to part of the headword itself.
+	headword := word
+	if article != "" {
+		headword = article + " " + word
+	}
+
 	definition = formatCard(cardFormat, translations[0], translations[1:], targetExample)
-	front = formatCard(cardFormat, word, nil, sourceExample)
+	front = formatCard(cardFormat, headword, nil, sourceExample)
 	return definition, front, true
 }
 
-// splitExample splits a bare example <li>'s raw content - "Dutch
-// phrase<br/>German translation", no wrapping tags - into its two halves on
-// the first <br> (mirroring the flat-format branch's own "<br" split, same
-// case-insensitive/self-closing tolerance). Returns ("", "") if there's no
-// <br> to split on, or either half cleans down to nothing - a malformed or
-// unrecognized example is worth skipping over, not worth showing broken.
+// splitExample pulls one example's two halves out of its raw <li> content.
+//
+// The <br> always separates the source phrase from everything the entry has
+// to say about its translation, so the source half is bounded by it either
+// way. What differs is the target half:
+//
+//   - With class="t" markers (see CLASSES.md), take the *first* marked span.
+//     A bullet may carry several labelled alternatives - "(aan het licht
+//     brengen) X (publiciteit geven) Y" - and only the first belongs on a
+//     card. Any label sitting between the <br> and that span qualifies the
+//     translation, not the phrase, so it is left out of both halves.
+//   - Without them (a dictionary from another source, e.g. nl-en), fall
+//     back to taking everything after the <br>.
+//
+// Returns ("", "") when either half cleans down to nothing - a malformed or
+// unrecognized example is worth skipping, not worth showing broken.
 func splitExample(raw string) (source, target string) {
 	idx := strings.Index(strings.ToLower(raw), "<br")
 	if idx < 0 {
@@ -1100,7 +1194,14 @@ func splitExample(raw string) (source, target string) {
 	if gt := strings.Index(rest, ">"); gt >= 0 {
 		rest = rest[gt+1:]
 	}
-	source, target = cleanPlainText(head), cleanPlainText(rest)
+
+	source = cleanPlainText(head)
+	if m := targetSpanRe.FindStringSubmatch(rest); m != nil {
+		target = cleanPlainText(m[1])
+	} else {
+		target = cleanPlainText(rest)
+	}
+
 	if source == "" || target == "" {
 		return "", ""
 	}

@@ -107,6 +107,23 @@ chatgpt_max_alternatives=3
 # behind rather than an empty gap.
 card_format=[**{head}**][\n{alts}][\n*{ex}*]
 
+# Which annotations to remove from card text, for dictionaries whose entries
+# carry them as typed classes (see CLASSES.md next to the dict extractor):
+#   gen   (der), (het)      article / grammatical gender
+#   gram  (4e naamval)      case, verb type, number
+#   reg   (figuurlijk)      register or usage
+#   dom   (medisch)         subject field
+#   geo   (België)          regional marker
+# The default drops the purely grammatical ones, which are noise on a card,
+# and keeps the ones that say something about when a word is used. Set it
+# empty to keep everything. Dictionaries without these classes are
+# unaffected - nothing is stripped that isn't explicitly marked.
+#
+# Note the source-language article is *not* governed by this: it is promoted
+# onto the headword itself ("het huis"), since that is part of learning the
+# noun rather than an annotation about it.
+dict_strip_labels=gen,gram
+
 [nl]
 # Any of max_senses/max_depth/max_chars can also be set per language,
 # overriding the global defaults above for words from this language only

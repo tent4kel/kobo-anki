@@ -169,7 +169,7 @@ func TestComputeGroupsRecognizesWordsWithStyledFrontAsExisting(t *testing.T) {
 func TestExtractEntryFlatFormat(t *testing.T) {
 	block := `<w><a name="Aagje"/><div><b>Aagje</b><br/><font color="#007000">noun</font><br>
 female first name</div></w>`
-	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat())
+	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -190,7 +190,7 @@ func TestExtractEntryFlatFormatEmbeddedNewline(t *testing.T) {
 	// phonetic left unstripped, glued to the real gloss).
 	block := `<w><a name="invloed"/><div><b>invloed</b><br/>invloed [invlut]
      Einfluß</div></w>`
-	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat())
+	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -218,7 +218,7 @@ func TestExtractEntryTranslationTagKeepsOnlyBoldSpans(t *testing.T) {
 	block := `<w><p><a name="invloed" /><b>invloed</b></p><var></var><ol>
 <li><div><i>inwerking</i><br/><b>Einfluss</b><i> (der</i>), <b>Einwirkung</b><i> (die</i>)</div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -238,7 +238,7 @@ func TestExtractEntryTranslationTagDoesNotMatchBr(t *testing.T) {
 	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
 <li><div><b>Warnung</b><i> (die</i>)<br/><i>(x)</i><b>Verwarnung</b><i> (die</i>)</div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -255,7 +255,7 @@ func TestExtractEntryTranslationTagFallsBackWhenTagAbsent(t *testing.T) {
 	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
 <li><div>plain sense with no bold or italic spans at all</div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -271,7 +271,7 @@ func TestExtractEntryTranslationTagIgnoredForFlatFormat(t *testing.T) {
 	// tagRe within the nested/<li> branch), or it would extract nothing.
 	block := `<w><a name="Aagje"/><div><b>Aagje</b><br/><font color="#007000">noun</font><br>
 female first name</div></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -290,7 +290,7 @@ func TestExtractEntryCardWithExample(t *testing.T) {
 <div class="ex"><div>♦ voorbeelden</div><ul><li>een afspraak maken<br/>eine Verabredung treffen</li><li>een afspraak verzetten<br/>einen Termin verschieben</li></ul></div>
 </li>
 </ol></w>`
-	word, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat())
+	word, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -315,7 +315,7 @@ func TestExtractEntryCardDoesNotMistakeSecondSenseForExample(t *testing.T) {
 <li><div><b>anwesend</b></div></li>
 <li><div><b>heutig</b>, <b>gegenwärtig</b></div></li>
 </ol></w>`
-	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat())
+	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -333,7 +333,7 @@ func TestExtractEntryCardWithoutExampleAvailable(t *testing.T) {
 	block := `<w><p><a name="onomkoopbaar" /><b>onomkoopbaar</b></p><var></var><ol>
 <li><div><b>unbestechlich</b></div></li>
 </ol></w>`
-	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat())
+	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -359,7 +359,7 @@ func TestExtractEntryCardExampleWithInlineAnnotationDoesNotNestMarkdown(t *testi
 <div class="ex"><div>♦ voorbeelden</div><ul><li>verschrikkelijke gevolgen<br/><i>(ook)</i> verheerende Folgen</li></ul></div>
 </li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -376,7 +376,7 @@ func TestExtractEntryCardFallsBackWhenNoTagMatch(t *testing.T) {
 	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
 <li><div>plain sense with no bold spans at all</div></li>
 </ol></w>`
-	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat())
+	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, true, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -396,7 +396,7 @@ func TestExtractEntryCardDisabledByDefault(t *testing.T) {
 <li><div><b>Verabredung</b><i> (die</i>), <b>Vereinbarung</b><i> (die</i>)</div></li>
 <li>een afspraak maken<br/>eine Verabredung treffen</li>
 </ol></w>`
-	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat())
+	_, def, front, ok := extractEntry(block, 1, 1, 150, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -432,7 +432,7 @@ func TestExtractEntryMultiSenseDoesNotAbsorbNestedExampleLis(t *testing.T) {
 <div class="ex"><div>♦ voorbeelden</div><ul><li>iemand met een boodschap belasten<br/>jemanden mit einem Auftrag betrauen</li></ul></div>
 </li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 2, 1, 300, boldTagRe, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 2, 1, 300, boldTagRe, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -460,7 +460,7 @@ func TestParseKoboDictKeepsRicherHomographBlock(t *testing.T) {
 <w><p><a name="ruim" /><b>ruim</b></p><var></var><ol>
 <li><div><b>weit</b>, <b>geräumig</b>, <b>großzügig</b></div></li>
 </ol></w>`
-	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", false, defaultCardFormat())
+	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", false, defaultCardFormat(), nil)
 	if err != nil {
 		t.Fatalf("parseKoboDict: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestParseKoboDictKeepsRicherHomographBlockRegardlessOfOrder(t *testing.T) {
 <w><p><a name="ruim" /><b>ruim</b></p><var></var><ol>
 <li><div><b>raum</b></div></li>
 </ol></w>`
-	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", false, defaultCardFormat())
+	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", false, defaultCardFormat(), nil)
 	if err != nil {
 		t.Fatalf("parseKoboDict: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestParseKoboDictDiscardsStaleFrontFromReplacedBlock(t *testing.T) {
 <w><p><a name="test" /><b>test</b></p><var></var><ol>
 <li><div>a much longer plain sense with no bold spans at all so the card path falls back and never sets Front for this block</div></li>
 </ol></w>`
-	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", true, defaultCardFormat())
+	dict, err := parseKoboDict(writeTestDictZip(t, body), 1, 1, 300, "b", true, defaultCardFormat(), nil)
 	if err != nil {
 		t.Fatalf("parseKoboDict: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestExtractEntryNestedFormatBoldItalic(t *testing.T) {
 <div><b>Kühle</b><i> (die;</i> mv: <i>geen meervoud)</i></div>
 </li>
 </ol></w>`
-	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat())
+	word, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -547,7 +547,7 @@ func TestExtractEntryBrBecomesLineBreak(t *testing.T) {
 	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
 <li><div><i>first</i><br/><i>second</i></div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -564,7 +564,7 @@ func TestExtractEntryMultipleSensesBecomeList(t *testing.T) {
 <li><div>first sense</div></li>
 <li><div>second sense</div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 2, 1, 150, nil, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 2, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -578,7 +578,7 @@ func TestExtractEntrySingleSenseHasNoBullet(t *testing.T) {
 	block := `<w><p><a name="gaan" /><b>gaan</b></p><var></var><ol>
 <li><div>only sense</div></li>
 </ol></w>`
-	_, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat())
+	_, def, _, ok := extractEntry(block, 1, 1, 150, nil, false, defaultCardFormat(), nil)
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
@@ -728,5 +728,114 @@ func TestExportCSVWritesSourceWordAsID(t *testing.T) {
 	}
 	if cards[0].Key() != "liepen" {
 		t.Errorf("Key() = %q, want the source word", cards[0].Key())
+	}
+}
+
+// --- class-aware extraction (see CLASSES.md in the dict source) ---
+
+func TestExtractCardEntryPrefersClassMarkers(t *testing.T) {
+	// class="tr" identifies real translations, class="t" the target half of
+	// an example. Note the bolded "(in" government fragment carries no tr
+	// class and must not reach the card, and the example holds two labelled
+	// alternatives of which only the first is wanted.
+	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
+<li>
+<div><b class="tr">hineinstürzen</b><i class="gram"> (sein)</i><b> (in</b><b>)</b>, <b class="tr">stürzen</b></div>
+<div class="ex"><div>♦ voorbeelden</div><ul><li>iets openbaar maken<br/><i class="reg">(aan het licht brengen)</i><span class="t">etwas an die Öffentlichkeit bringen</span> <i class="reg">(publiciteit geven)</i><span class="t">etwas veröffentlichen</span></li></ul></div>
+</li>
+</ol></w>`
+	_, def, front, ok := extractEntry(block, 1, 1, 300, boldTagRe, true, defaultCardFormat(),
+		map[string]bool{"gen": true, "gram": true})
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	wantDef := "**hineinstürzen**\nstürzen\n*etwas an die Öffentlichkeit bringen*"
+	if def != wantDef {
+		t.Errorf("def  = %q\nwant = %q", def, wantDef)
+	}
+	wantFront := "**test**\n*iets openbaar maken*"
+	if front != wantFront {
+		t.Errorf("front = %q\nwant  = %q", front, wantFront)
+	}
+}
+
+func TestExtractCardEntryFallsBackWithoutClasses(t *testing.T) {
+	// A dictionary from another source (the nl-en one here) carries no
+	// class markers at all; extraction must still work via translation_tag
+	// and the <br> split.
+	block := `<w><p><a name="test" /><b>test</b></p><var></var><ol>
+<li>
+<div><b>Verabredung</b><i> (die</i>), <b>Abmachung</b></div>
+<div class="ex"><div>♦ voorbeelden</div><ul><li>een afspraak maken<br/>eine Verabredung treffen</li></ul></div>
+</li>
+</ol></w>`
+	_, def, front, ok := extractEntry(block, 1, 1, 300, boldTagRe, true, defaultCardFormat(), nil)
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if def != "**Verabredung**\nAbmachung\n*eine Verabredung treffen*" {
+		t.Errorf("def = %q", def)
+	}
+	if front != "**test**\n*een afspraak maken*" {
+		t.Errorf("front = %q", front)
+	}
+}
+
+func TestStripLabelClassesRemovesOnlyRequestedClasses(t *testing.T) {
+	src := `<i class="gen">(der)</i><i class="reg">(figuurlijk)</i><i class="dom">(medisch)</i><i>(ook)</i>`
+	got := stripLabelClasses(src, map[string]bool{"gen": true, "dom": true})
+	if strings.Contains(got, "der") || strings.Contains(got, "medisch") {
+		t.Errorf("requested classes not removed: %q", got)
+	}
+	if !strings.Contains(got, "figuurlijk") || !strings.Contains(got, "(ook)") {
+		t.Errorf("unrequested / unclassified annotations were removed: %q", got)
+	}
+	if stripLabelClasses(src, nil) != src {
+		t.Error("an empty set must leave the markup untouched")
+	}
+}
+
+func TestLabelSetIgnoresUnknownClasses(t *testing.T) {
+	got := labelSet([]string{"gen", "nonsense", "reg", ""})
+	if !got["gen"] || !got["reg"] {
+		t.Errorf("known classes missing: %v", got)
+	}
+	if got["nonsense"] {
+		t.Errorf("unknown class accepted: %v", got)
+	}
+}
+
+func TestExtractCardEntryPutsArticleOnSourceSide(t *testing.T) {
+	// A learner needs "het huis", not "huis". The article is salvaged from
+	// the entry's headword line by the dict pipeline (class="art") and
+	// belongs with the source-language headword only - the German "(das)"
+	// on the translation is a different article and stays an annotation.
+	block := `<w><p><a name="huis" /><b>huis</b></p><var></var><i class="art">(het)</i><ol>
+<li><div><b class="tr">Haus</b><i class="gen"> (das)</i></div></li>
+</ol></w>`
+	_, def, front, ok := extractEntry(block, 1, 1, 300, boldTagRe, true, defaultCardFormat(),
+		map[string]bool{"gen": true, "gram": true})
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if front != "**het huis**" {
+		t.Errorf("front = %q, want %q", front, "**het huis**")
+	}
+	if def != "**Haus**" {
+		t.Errorf("def = %q, want the German article stripped as an annotation", def)
+	}
+}
+
+func TestExtractCardEntryWithoutArticle(t *testing.T) {
+	// Verbs and adjectives carry no article; the headword is used as-is.
+	block := `<w><p><a name="lopen" /><b>lopen</b></p><var></var><ol>
+<li><div><b class="tr">laufen</b></div></li>
+</ol></w>`
+	_, _, front, ok := extractEntry(block, 1, 1, 300, boldTagRe, true, defaultCardFormat(), nil)
+	if !ok {
+		t.Fatalf("expected ok=true")
+	}
+	if front != "**lopen**" {
+		t.Errorf("front = %q, want the bare headword", front)
 	}
 }
