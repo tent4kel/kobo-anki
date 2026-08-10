@@ -839,3 +839,26 @@ func TestExtractCardEntryWithoutArticle(t *testing.T) {
 		t.Errorf("front = %q, want the bare headword", front)
 	}
 }
+
+func TestExtractCardEntryWorksWithoutTranslationTag(t *testing.T) {
+	// A dictionary carrying class="tr" needs no translation_tag: the card
+	// path used to be gated on one being configured, so dropping the
+	// setting silently disabled dict_examples even for a marked-up dict.
+	block := `<w><p><a name="huis" /><b>huis</b></p><var></var><i class="art">(het)</i><ol>
+<li>
+<div><b class="tr">Haus</b><i class="gen"> (das)</i></div>
+<div class="ex"><div>♦ voorbeelden</div><ul><li>een mooi huis<br/><span class="t">ein schönes Haus</span></li></ul></div>
+</li>
+</ol></w>`
+	_, def, front, ok := extractEntry(block, 1, 1, 300, nil, true, defaultCardFormat(),
+		map[string]bool{"gen": true})
+	if !ok {
+		t.Fatalf("expected ok=true with tagRe nil")
+	}
+	if def != "**Haus**\n*ein schönes Haus*" {
+		t.Errorf("def = %q", def)
+	}
+	if front != "**het huis**\n*een mooi huis*" {
+		t.Errorf("front = %q", front)
+	}
+}

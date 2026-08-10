@@ -650,6 +650,7 @@ func printEffectiveConfig(cfg Config) {
 	fmt.Printf("out          %s\n", cfg.OutDir)
 	fmt.Printf("ca_cert      %s\n", cfg.CACertPath)
 	fmt.Printf("card_format  %q\n", cfg.CardFormat)
+	fmt.Printf("strip_labels %v\n", cfg.StripLabels)
 	fmt.Printf("providers    %v\n", cfg.Providers)
 	fmt.Printf("chatgpt      model=%s temperature=%v max_tokens=%d max_alternatives=%d conf=%s\n",
 		cfg.ChatGPTModel, cfg.ChatGPTTemperature, cfg.ChatGPTMaxTokens, cfg.ChatGPTMaxAlternatives, cfg.ChatGPTConf)
@@ -974,7 +975,10 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 	word = strings.ToLower(nameMatch[1])
 
 	if topSenses := topLevelLis(block); len(topSenses) > 0 {
-		if wantExamples && tagRe != nil {
+		// No tagRe requirement: a dictionary carrying class="tr" needs no
+		// translation_tag at all, and extractCardEntry falls back to tagRe
+		// only when the class is absent.
+		if wantExamples {
 			article := ""
 			if m := articleRe.FindStringSubmatch(block); m != nil {
 				article = strings.TrimSpace(m[1])
@@ -1139,7 +1143,7 @@ func extractCardEntry(word string, senses []string, tagRe *regexp.Regexp, cardFo
 	// case-government marker, which used to land on the card. Prefer the
 	// class where the dictionary provides it.
 	translations := extractTagList(senseDivs[0], trSpanRe)
-	if len(translations) == 0 {
+	if len(translations) == 0 && tagRe != nil {
 		translations = extractTagList(senseDivs[0], tagRe)
 	}
 	if len(translations) == 0 {
