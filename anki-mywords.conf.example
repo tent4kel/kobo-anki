@@ -124,6 +124,58 @@ card_format=[**{head}**][\n{alts}][\n*{ex}*]
 # noun rather than an annotation about it.
 dict_strip_labels=gen,gram
 
+# --- Dictionary structure -----------------------------------------------
+#
+# Every dicthtml-*.zip has the same outer shape (the Kobo firmware fixes
+# that), but generators disagree about everything inside it: where the
+# translation sits, whether senses are numbered, which half of an example is
+# the foreign one. That shape is described by a *profile* - a handful of CSS
+# selectors - rather than by branches in the parser, so a dictionary this
+# project has never seen can be supported by writing a section here.
+#
+# You normally need none of this: the profile is detected from the markup at
+# load time. `kobo-vocab -print-config` shows which one each dictionary
+# resolved to, and `-test-dict dict/dicthtml-nl-de.zip` prints the profile in
+# the syntax below, ready to paste and adjust.
+#
+# Built-in profiles:
+#   vandale   this project's own build (see CLASSES.md next to the dict
+#             extractor): numbered senses, class="tr" translations,
+#             class="ex" example blocks. Everything is marked, so nothing
+#             has to be guessed - the shape to aim for if you generate a
+#             dictionary yourself.
+#   flat      conversions from StarDict and friends: a header, a <br>, and
+#             the gloss. No markup at all, so the translation is found by
+#             position.
+#   nested    numbered senses and nothing else marked.
+#   wikdict   WikDict's generated dicts (https://download.wikdict.com).
+#   auto      detect (the default - same as writing no section).
+#   custom    start from nothing and state every selector yourself.
+#
+# A section is keyed by language pair, matching the dicthtml-xx-yy.zip file
+# name. Naming a base profile and then overriding one selector is fine; the
+# rest of the base is kept.
+#
+# [dict:nl-de]
+# profile=vandale
+#
+# [dict:de-fr]
+# profile=custom
+# sense=ol > li                 # what to loop over; omit if entries are flat
+# translation=b.tr | div > i    # fallback chain, first match wins
+# translation_reject=font.grammar  # matched inside a candidate = not a translation
+# example=div.ex ul li
+# example_target=span.t         # which half of the example is the target language
+# article=i.art                 # source-language article, promoted onto the headword
+# drop_tags=med,sport           # inline subject markers to delete before reading text
+# split_on=;                    # extra separator between translations, besides ","
+#
+# The selector language is a small CSS subset and nothing more: tag names,
+# ".class", descendant and ">" child combinators, and ":nth-of-type(n)".
+# Selectors are relative to their scope - sense within the entry, everything
+# else within the sense. A selector that matches nothing yields no entries
+# rather than an error, so check with -test-dict after editing.
+
 [nl]
 # Any of max_senses/max_depth/max_chars can also be set per language,
 # overriding the global defaults above for words from this language only
@@ -142,18 +194,25 @@ dict_strip_labels=gen,gram
 # flat-format dicts (e.g. nl-en), where <b> wraps the repeated headword
 # instead - those are left as full text. Comment out to see full definitions
 # again.
+#
+# This is per-language, which is the wrong granularity: nl-de and nl-en are
+# both "nl" but need different answers. It is kept because it works, and is
+# used as the last fallback in a profile's translation chain - so a dict that
+# marks its translations properly is preferred and one that only bolds them
+# still works. A [dict:nl-de] section is the precise way to say the same
+# thing.
 translation_tag=b
 #
 # dict_examples=true: build a ChatGPT/Lexicala-style card (bold headword +
 # alternatives + one example, on both the front and back) straight from the
 # dict's own example phrases, instead of the plain translation list above.
-# Off by default - only verified against dicthtml-nl-de.zip, and requires
-# translation_tag to also be set (it's what isolates the bold translation
-# from the surrounding gloss/grammar text). A different nested-format dict
-# may structure its examples differently; check a few entries with
-# `kobo-vocab -test-dict` before turning this on for one. Words the dict
-# doesn't illustrate with an example (common for rarer vocabulary) still get
-# a themed card, just without the example.
+# Off by default. It needs the translations individually - one becomes the
+# headword, the rest alternatives - so it only applies to a dictionary whose
+# profile can tell them apart; a flat dict, which finds its gloss by
+# position, is left as a plain definition rather than having a card invented
+# from comma-splitting it. Words the dict doesn't illustrate with an example
+# (common for rarer vocabulary) still get a themed card, just without the
+# example. Check a few entries with `kobo-vocab -test-dict` first.
 # dict_examples=true
 reduce_double=true
 strip=en

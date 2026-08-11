@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
+	"golang.org/x/net/html"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -861,4 +863,93 @@ func TestExtractCardEntryWorksWithoutTranslationTag(t *testing.T) {
 	if front != "**het huis**\n*een mooi huis*" {
 		t.Errorf("front = %q", front)
 	}
+}
+
+// extractEntry adapts the pre-profile signature onto the profile pipeline,
+// so every behaviour these tests pin down - flat glosses, embedded
+// newlines, sense limits, bold-only translations, themed cards - is still
+// checked, now through the code that actually runs. The profile is detected
+// from the block itself, exactly as a real dictionary's would be.
+func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp.Regexp, wantExamples bool, cf cardTemplate, dropLabels map[string]bool) (word, definition, front string, ok bool) {
+	tag := ""
+	if tagRe != nil {
+		tag = "b" // every caller here uses the bold tag
+	}
+	var strip []string
+	for k, v := range dropLabels {
+		if v {
+			strip = append(strip, k)
+		}
+	}
+	sort.Strings(strip)
+
+	name := detectProfile(block)
+	p := builtinProfiles[name]
+	p.name = name
+	if tag != "" && p.translationText == "" {
+		if len(p.translation) > 0 {
+			p.translation = append(append([]string{}, p.translation...), scopeOf(p.translation[0])+tag)
+		} else {
+			p.translation = []string{"> div:nth-of-type(1) " + tag, tag}
+		}
+	}
+
+	doc, err := html.Parse(strings.NewReader(normalizeDictHTML(block)))
+	if err != nil {
+		return "", "", "", false
+	}
+	c := compileProfile(p, strip)
+	nodes := query(doc, c.entry)
+	if len(nodes) == 0 {
+		return "", "", "", false
+	}
+	e, got := extractProfiled(c, nodes[0])
+	if !got {
+		return "", "", "", false
+	}
+	definition, front = renderEntry(e, dictRender{
+		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
+		asCard: wantExamples, cardFormat: cf,
+	}, p)
+	return e.word, definition, front, definition != ""
+}
+
+// parseKoboDict adapts the pre-profile loader signature onto parseDict,
+// detecting the profile from the dictionary itself.
+func parseKoboDict(path string, maxSenses, maxDepth, maxChars int, tag string, dictExamples bool, cf cardTemplate, dropLabels map[string]bool) (*KoboDict, error) {
+	p, _ := resolveDictProfile(Config{}, "", path, tag)
+	var strip []string
+	for k, v := range dropLabels {
+		if v {
+			strip = append(strip, k)
+		}
+	}
+	sort.Strings(strip)
+	return parseDict(path, compileProfile(p, strip), dictRender{
+		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
+		asCard: dictExamples, cardFormat: cf,
+	})
+}
+
+// stripLabelClasses adapts the old regex-based label stripper onto the
+// selector-based one, which now removes annotations by class alone rather
+// than by a fixed <i class="..."> pattern.
+func stripLabelClasses(src string, drop map[string]bool) string {
+	if len(drop) == 0 {
+		return src
+	}
+	doc, err := html.Parse(strings.NewReader(src))
+	if err != nil {
+		return src
+	}
+	for cls, want := range drop {
+		if want {
+			removeMatching(doc, parseSelector("."+cls))
+		}
+	}
+	var b strings.Builder
+	if err := html.Render(&b, doc); err != nil {
+		return src
+	}
+	return b.String()
 }

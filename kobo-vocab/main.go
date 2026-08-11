@@ -1,10 +1,7 @@
 package main
 
 import (
-	"archive/zip"
 	"bufio"
-	"bytes"
-	"compress/gzip"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -58,6 +55,23 @@ type Config struct {
 	ChatGPTMaxAlternatives int
 
 	Langs map[string]*LangRules
+
+	// Dicts holds one entry per [dict:xx-yy] section, keyed by language pair
+	// ("nl-de"). A dictionary's structure is a property of the pair, not of
+	// the source language: nl-de and nl-en can come from entirely different
+	// generators, which a [nl] section has no way to express - it is why
+	// translation_tag had to carry "has no effect on flat dictionaries" as a
+	// caveat rather than simply not applying.
+	Dicts map[string]*DictSection
+}
+
+// DictSection is a parsed [dict:xx-yy] section: a base profile by name, plus
+// any selectors given inline. Naming a base and overriding one selector is
+// allowed, which is usually all a slightly-off dictionary needs.
+type DictSection struct {
+	Base      string // "", "auto", or a name from builtinProfiles
+	Overrides dictProfile
+	HasFields bool
 }
 
 type LangRules struct {
@@ -175,6 +189,7 @@ func loadConfig(path string) Config {
 		ChatGPTMaxAlternatives: 3,
 
 		Langs: make(map[string]*LangRules),
+		Dicts: make(map[string]*DictSection),
 	}
 
 	f, err := os.Open(path)
@@ -189,6 +204,7 @@ func loadConfig(path string) Config {
 
 	outWasSet := false
 	var currentLang *LangRules
+	var currentDict *DictSection
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
 	for scanner.Scan() {
@@ -198,11 +214,17 @@ func loadConfig(path string) Config {
 			continue
 		}
 
-		// Language section header: [nl]
+		// Section header: [nl] for a language, [dict:nl-de] for a dictionary.
 		if line[0] == '[' && line[len(line)-1] == ']' {
-			lang := line[1 : len(line)-1]
-			currentLang = &LangRules{}
-			cfg.Langs[lang] = currentLang
+			name := line[1 : len(line)-1]
+			currentLang, currentDict = nil, nil
+			if pair, ok := strings.CutPrefix(name, "dict:"); ok {
+				currentDict = &DictSection{}
+				cfg.Dicts[pair] = currentDict
+			} else {
+				currentLang = &LangRules{}
+				cfg.Langs[name] = currentLang
+			}
 			continue
 		}
 
@@ -212,6 +234,65 @@ func loadConfig(path string) Config {
 		}
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
+
+		if currentDict != nil {
+			// Inside a [dict:xx-yy] section. Every key here is a selector
+			// describing where this dictionary keeps something; see
+			// dictprofile.go for the shape and selector.go for the syntax.
+			p := &currentDict.Overrides
+			if key == "profile" {
+				if slices.Contains(profileNames(), val) {
+					currentDict.Base = val
+				} else {
+					warn.BadValue(lineNo, key, val, "one of "+strings.Join(profileNames(), ", "))
+				}
+				continue
+			}
+			// HasFields distinguishes "this section describes structure" from
+			// "this section only names a base profile". It accumulates over
+			// the keys that were understood: a typo further down warns but
+			// must not discard the valid selectors above it.
+			known := true
+			switch key {
+			case "sense":
+				p.sense = val
+			case "translation":
+				// A chain, written with "|" between alternatives: one
+				// generator can emit more than one entry shape.
+				for _, alt := range strings.Split(val, "|") {
+					if alt = strings.TrimSpace(alt); alt != "" {
+						p.translation = append(p.translation, alt)
+					}
+				}
+			case "translation_reject":
+				p.translationDrop = val
+			case "translation_text":
+				if val == "afterLastBR" {
+					p.translationText = val
+				} else {
+					warn.BadValue(lineNo, key, val, "afterLastBR")
+				}
+			case "example":
+				p.example = val
+			case "example_target":
+				p.exampleTarget = val
+			case "article":
+				p.article = val
+			case "entry":
+				p.entry = val
+			case "head":
+				p.headAttr = val
+			case "drop_tags":
+				p.dropTags = append(p.dropTags, splitProviders(val)...)
+			case "split_on":
+				p.splitOn = val
+			default:
+				known = false
+				warn.UnknownKey(lineNo, key)
+			}
+			currentDict.HasFields = currentDict.HasFields || known
+			continue
+		}
 
 		if currentLang != nil {
 			// Inside a language section
@@ -510,7 +591,7 @@ func main() {
 	}
 
 	if *testDict != "" {
-		testDictFile(*testDict, cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.CardFormat, cfg.StripLabels)
+		testDictFile(cfg, *testDict)
 		return
 	}
 
@@ -573,7 +654,10 @@ func main() {
 			dict = dictCache[suffix]
 			if dict == nil {
 				path := filepath.Join(cfg.DictDir, "dicthtml"+suffix+".zip")
-				if parsed, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, cardFormat, labelSet(cfg.StripLabels)); err != nil {
+				prof, origin := resolveDictProfile(cfg, strings.TrimPrefix(suffix, "-"), path, translationTag)
+				log.Printf("  dictionary profile: %s (%s)", prof.name, origin)
+				render := dictRender{maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars, asCard: dictExamples, cardFormat: cardFormat}
+				if parsed, err := parseDict(path, compileProfile(prof, cfg.StripLabels), render); err != nil {
 					log.Printf("No dictionary for suffix %s (dicthtml%s.zip): %v", suffix, suffix, err)
 				} else {
 					if len(parsed.Entries) == 0 {
@@ -666,6 +750,56 @@ func printEffectiveConfig(cfg Config) {
 		fmt.Printf("%-8s %-10d %-9d %-9d %-15q %-13v %v\n",
 			lang, senses, depth, chars, tag, examples, effectiveProviders(cfg, rules))
 	}
+
+	printDictProfiles(cfg)
+}
+
+// printDictProfiles lists the dictionary each pair would be parsed with. The
+// profile is usually detected rather than written down, so without this the
+// only way to learn which one is in force is to read the log of a real run -
+// or to notice the cards coming out wrong. Resolving means opening the zips,
+// which is why this is at the end.
+func printDictProfiles(cfg Config) {
+	pairs := dictPairs(cfg)
+	if len(pairs) == 0 {
+		return
+	}
+	fmt.Printf("\n%-10s %-10s %-22s %s\n", "dict", "profile", "origin", "file")
+	for _, pair := range pairs {
+		path := filepath.Join(cfg.DictDir, "dicthtml-"+pair+".zip")
+		if _, err := os.Stat(path); err != nil {
+			// Configured but not installed: say so rather than sniffing a
+			// missing file and reporting the fallback as if it were real.
+			fmt.Printf("%-10s %-10s %-22s %s\n", pair, "?", "not resolved", "missing: "+path)
+			continue
+		}
+		fromLang, _, _ := strings.Cut(pair, "-")
+		_, _, _, tag, _ := effectiveLimits(cfg, cfg.Langs[fromLang])
+		prof, origin := resolveDictProfile(cfg, pair, path, tag)
+		fmt.Printf("%-10s %-10s %-22s %s\n", pair, prof.name, origin, filepath.Base(path))
+	}
+}
+
+// dictPairs is every language pair worth reporting on: the dictionaries
+// present in dict_dir, plus any pair with a [dict:] section, so a section
+// naming a pair with no dictionary installed still shows up (as a typo
+// usually would).
+func dictPairs(cfg Config) []string {
+	seen := map[string]bool{}
+	var pairs []string
+	matches, _ := filepath.Glob(filepath.Join(cfg.DictDir, "dicthtml-*.zip"))
+	for _, m := range matches {
+		pair := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "dicthtml-"), ".zip")
+		seen[pair] = true
+		pairs = append(pairs, pair)
+	}
+	for pair := range cfg.Dicts {
+		if !seen[pair] {
+			pairs = append(pairs, pair)
+		}
+	}
+	slices.Sort(pairs)
+	return pairs
 }
 
 func langList(m map[string]*LangRules) []string {
@@ -823,10 +957,6 @@ func generateStems(word string, rules *LangRules) []string {
 // algorithm, silently destroying ~99% of entries. Regex-based extraction is
 // deliberate here, not an oversight.
 
-var wordBlockRe = regexp.MustCompile(`(?s)<w>(.*?)</w>`)
-var nameAttrRe = regexp.MustCompile(`<a\s+name="([^"]*)"`)
-var liRe = regexp.MustCompile(`(?s)<li>(.*?)</li>`)
-var divRe = regexp.MustCompile(`(?s)<div>(.*?)</div>`)
 var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
 var whitespaceRe = regexp.MustCompile(`\s+`)
 
@@ -840,17 +970,44 @@ var mergeBoldRe = regexp.MustCompile(`(?i)</b>(\s*)<b>`)
 const brSentinel = "\x00BR\x00"
 
 // testDictFile parses a single dict zip and prints diagnostics, for checking
-// whether a dictionary is supported before deploying it to the Kobo.
-func testDictFile(path string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat string, stripLabels []string) {
-	dict, err := parseKoboDict(path, maxSenses, maxDepth, maxChars, translationTag, dictExamples, compileCardFormatOrDefault(cardFormat), labelSet(stripLabels))
+// whether a dictionary is supported before deploying it to the Kobo. It
+// leads with the profile and where it came from, since that is the setting
+// that decides whether anything below it makes sense - and prints it in
+// [dict:] syntax, ready to paste into the config if it needs adjusting.
+func testDictFile(cfg Config, path string) {
+	pair := ""
+	if base := filepath.Base(path); strings.HasPrefix(base, "dicthtml-") {
+		pair = strings.TrimSuffix(strings.TrimPrefix(base, "dicthtml-"), ".zip")
+	}
+	// Resolve through the [lang] section for the pair's source language, so
+	// this shows what a real run produces rather than what the global
+	// defaults alone would.
+	fromLang, _, _ := strings.Cut(pair, "-")
+	maxSenses, maxDepth, maxChars, translationTag, dictExamples := effectiveLimits(cfg, cfg.Langs[fromLang])
+	prof, origin := resolveDictProfile(cfg, pair, path, translationTag)
+
+	render := dictRender{
+		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
+		asCard: dictExamples, cardFormat: compileCardFormatOrDefault(cfg.CardFormat),
+	}
+	dict, err := parseDict(path, compileProfile(prof, cfg.StripLabels), render)
 	if err != nil {
 		log.Fatalf("Failed to parse %s: %v", path, err)
 	}
+
 	fmt.Printf("%s: %d entries\n", path, len(dict.Entries))
+	fmt.Printf("profile: %s (%s)\n", prof.name, origin)
+	if pair != "" {
+		fmt.Printf("  [dict:%s]\n  profile=%s\n", pair, prof.name)
+		for _, line := range describeProfile(prof) {
+			fmt.Printf("  %s\n", line)
+		}
+	}
 	if len(dict.Entries) == 0 {
-		fmt.Println("No entries parsed - dictionary format is likely unsupported.")
+		fmt.Println("No entries parsed - the profile does not match this dictionary's structure.")
 		return
 	}
+	fmt.Println()
 	n := 0
 	for word, def := range dict.Entries {
 		if front, ok := dict.Fronts[word]; ok {
@@ -865,393 +1022,9 @@ func testDictFile(path string, maxSenses, maxDepth, maxChars int, translationTag
 	}
 }
 
-func parseKoboDict(zipPath string, maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool, cardFormat cardTemplate, dropLabels map[string]bool) (*KoboDict, error) {
-	zr, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-
-	// Compiled once per dict load, not per entry - dicts run into the tens
-	// of thousands of entries and this regex would otherwise be rebuilt
-	// that many times.
-	var tagRe *regexp.Regexp
-	if translationTag != "" {
-		// The tag name must be followed by '>' or whitespace, not just any
-		// non-'>' character - `<b[^>]*>` would also match `<br/>` (and any
-		// other tag with "b" as a prefix), silently swallowing everything
-		// up to the next real </b> as if it were bold content.
-		t := regexp.QuoteMeta(translationTag)
-		tagRe = regexp.MustCompile(`(?is)<` + t + `(?:\s[^>]*)?>(.*?)</` + t + `\s*>`)
-	}
-
-	dict := &KoboDict{Entries: make(map[string]string), Fronts: make(map[string]string)}
-
-	for _, f := range zr.File {
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		raw, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			continue
-		}
-
-		var data []byte
-		if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-			gr, err := gzip.NewReader(bytes.NewReader(raw))
-			if err != nil {
-				continue
-			}
-			data, err = io.ReadAll(gr)
-			gr.Close()
-			if err != nil {
-				continue
-			}
-		} else {
-			data = raw
-		}
-
-		for _, block := range wordBlockRe.FindAllString(string(data), -1) {
-			word, definition, front, ok := extractEntry(block, maxSenses, maxDepth, maxChars, tagRe, dictExamples, cardFormat, dropLabels)
-			if !ok {
-				continue
-			}
-			// Homographs - the same headword spelled/pronounced differently
-			// across parts of speech (e.g. "ruim" as adverb, nautical term,
-			// adjective, and noun) - get their own separate <w> block in
-			// this dict rather than being combined into one entry. Verified
-			// against the real dict: 4.76% of headwords have more than one
-			// block, and for 67% of those, keeping whichever block merely
-			// happens to be parsed last (the previous behavior here) throws
-			// away a richer block for a thinner one - e.g. "ruim" kept a
-			// 2-sense nautical noun over an 8-sense adjective entry that's
-			// ruim's actually-common meaning; "aan" kept a 21-sense block
-			// over one with 45. Keeping whichever block's extracted
-			// definition is longest is a simple, order-independent proxy
-			// for "the more complete entry" that measurably beats
-			// last-wins on this data, without trying to guess which sense
-			// is grammatically "primary".
-			if existing, exists := dict.Entries[word]; exists && len(existing) >= len(definition) {
-				continue
-			}
-			dict.Entries[word] = definition
-			delete(dict.Fronts, word) // clear a stale front from a now-discarded block
-			if front != "" {
-				dict.Fronts[word] = front
-			}
-		}
-	}
-	return dict, nil
-}
-
-// extractEntry pulls the headword and definition out of a single <w>...</w>
-// block, handling both the flat and nested dict layouts described above.
-// tagRe, if non-nil, restricts each sense in the nested-format branch to
-// only the spans matched by that tag (see translation_tag in the config) -
-// e.g. keeping only <b>...</b> content drops the source-language gloss and
-// grammar annotations a rich dict wraps in <i>, leaving just the bare
-// target-language translation. It has no effect on the flat-format branch:
-// verified against a real flat dict (dicthtml-nl-en.zip) that <b> there
-// wraps the repeated headword, not the translation, so applying the same
-// filter there would extract nothing.
-//
-// wantExamples (see dict_examples in the config), if true and tagRe is also
-// set, tries extractCardEntry first for a ChatGPT/Lexicala-style card
-// (headword + alternatives + one example, matching formatCard's shape) built
-// from the dict's own example phrases - see extractCardEntry for how that's
-// found. maxSenses/maxDepth do not apply to that path: it only ever looks at
-// the entry's first sense, since "one example" doesn't compose with a
-// multi-sense list. Falls back to the plain multi-sense behavior below
-// whenever extractCardEntry finds nothing usable (e.g. no bold match in the
-// first sense), so a word without a matching translation doesn't silently
-// go blank.
-func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp.Regexp, wantExamples bool, cardFormat cardTemplate, dropLabels map[string]bool) (word, definition, front string, ok bool) {
-	nameMatch := nameAttrRe.FindStringSubmatch(block)
-	if nameMatch == nil {
-		return "", "", "", false
-	}
-	word = strings.ToLower(nameMatch[1])
-
-	if topSenses := topLevelLis(block); len(topSenses) > 0 {
-		// No tagRe requirement: a dictionary carrying class="tr" needs no
-		// translation_tag at all, and extractCardEntry falls back to tagRe
-		// only when the class is absent.
-		if wantExamples {
-			article := ""
-			if m := articleRe.FindStringSubmatch(block); m != nil {
-				article = strings.TrimSpace(m[1])
-			}
-			if def, fr, cardOK := extractCardEntry(word, topSenses, tagRe, cardFormat, dropLabels, article); cardOK {
-				def = truncateMarkdownVisible(def, maxChars)
-				fr = truncateMarkdownVisible(fr, maxChars)
-				return word, def, fr, true
-			}
-		}
-
-		// Nested format: join up to maxSenses top-level <li> senses. Within
-		// each sense, keep only its first maxDepth direct-child <div>s -
-		// dictgen always emits the core gloss as the first child div and,
-		// only if present, an examples div (class="ex") as the second and
-		// last child, so this reliably drops examples without depending on
-		// their class name or wording.
-		n := len(topSenses)
-		if maxSenses > 0 && n > maxSenses {
-			n = maxSenses
-		}
-		var senses []string
-		for _, m := range topSenses[:n] {
-			divs := topLevelDivs(m)
-			if len(divs) == 0 {
-				divs = []string{m}
-			}
-			if maxDepth > 0 && len(divs) > maxDepth {
-				divs = divs[:maxDepth]
-			}
-			joined := strings.Join(divs, " ")
-			sense := ""
-			if tagRe != nil {
-				sense = extractTagText(joined, tagRe)
-			}
-			if sense == "" {
-				sense = cleanText(joined)
-			}
-			if sense != "" {
-				senses = append(senses, sense)
-			}
-		}
-		if len(senses) > 1 {
-			definition = "- " + strings.Join(senses, "\n- ")
-		} else if len(senses) == 1 {
-			definition = senses[0]
-		}
-	} else if divMatch := divRe.FindStringSubmatch(block); divMatch != nil {
-		// Flat format: word/pos/gloss separated by <br>, gloss is the last segment.
-		body := divMatch[1]
-		parts := strings.Split(body, "<br")
-		var last string
-		if len(parts) >= 2 {
-			last = parts[len(parts)-1]
-			if idx := strings.Index(last, ">"); idx >= 0 {
-				last = last[idx+1:]
-			}
-		} else {
-			last = body
-		}
-		// Some dicts pack "word [phonetic]\nactual gloss" into that final
-		// segment as plain text with no further tag boundary (e.g.
-		// "<b>invloed</b><br/>invloed [invlut]\n     Einfluß") - split on
-		// the last literal newline too, mirroring the <br> heuristic one
-		// level deeper, so the phonetic-annotated word-repeat doesn't leak
-		// into the definition. Must happen before cleanText, which
-		// collapses newlines into spaces.
-		if idx := strings.LastIndex(last, "\n"); idx >= 0 {
-			if tail := strings.TrimSpace(last[idx+1:]); tail != "" {
-				last = tail
-			}
-		}
-		definition = cleanText(last)
-		if definition == "" {
-			definition = cleanText(body)
-		}
-	} else {
-		definition = cleanText(block)
-	}
-
-	definition = truncateMarkdownVisible(definition, maxChars)
-	return word, definition, "", definition != ""
-}
-
-// exDivOpenRe matches the opening tag of a sense's examples wrapper -
-// generated by this project's own dict source pipeline (extractor.py,
-// ~/Hacking/dict/) as an explicit, unambiguous marker: `<div class="ex">`,
-// always exactly that, immediately followed by a "♦ voorbeelden" label div
-// and a <ul> of one <li>Dutch phrase<br/>German translation</li> per
-// example. Verified present, in exactly this shape, in the currently
-// deployed dicthtml-nl-de.zip.
-var exDivOpenRe = regexp.MustCompile(`<div\s+class="ex"[^>]*>`)
-
-// Class markers emitted by the dict source pipeline (extractor.py; see
-// CLASSES.md next to it). They make explicit what this parser previously had
-// to infer: which bold spans are real translations rather than bolded
-// grammar notes, and which half of an example is the target language.
-//
-// Every use is best-effort. A dictionary built from another source - the
-// nl-en one here, for instance - carries none of these, so each lookup falls
-// back to the older positional heuristic. "No class" always means "unknown",
-// never "absent".
-var (
-	trSpanRe     = regexp.MustCompile(`(?is)<b\s+class="tr"[^>]*>(.*?)</b\s*>`)
-	targetSpanRe = regexp.MustCompile(`(?is)<span\s+class="t"[^>]*>(.*?)</span\s*>`)
-
-	// The source-language article, salvaged from the entry's headword line -
-	// "(het)" for huis. Only nouns have one (35,623 of 102,272 entries).
-	articleRe = regexp.MustCompile(`(?is)<i\s+class="art"[^>]*>\((.*?)\)</i\s*>`)
-)
-
-// labelClassRe matches one classified annotation, capturing its class, so
-// unwanted ones can be dropped from card text - see dict_strip_labels.
-var labelClassRe = regexp.MustCompile(`(?is)<i\s+class="(gen|gram|reg|dom|geo)"[^>]*>.*?</i\s*>`)
-
-// stripLabelClasses removes annotations whose class is in drop. An empty
-// set leaves the markup untouched.
-func stripLabelClasses(htmlSrc string, drop map[string]bool) string {
-	if len(drop) == 0 {
-		return htmlSrc
-	}
-	return labelClassRe.ReplaceAllStringFunc(htmlSrc, func(m string) string {
-		sub := labelClassRe.FindStringSubmatch(m)
-		if sub != nil && drop[sub[1]] {
-			return ""
-		}
-		return m
-	})
-}
-
-// extractCardEntry tries to build a ChatGPT/Lexicala-style card - bold
-// headword + alternatives + one example, via the shared formatCard - purely
-// from the dict's own content, for the entry's first sense only (senses[0]
-// from topLevelLis - a correctly-bounded top-level sense, not one that may
-// have been truncated mid-example by a naive non-nesting-aware <li> match).
-//
-// The example, if any, comes from that sense's own class="ex" wrapper (see
-// exDivOpenRe) - found by locating the marker, then re-running
-// topLevelDivs from that position so its full, correctly-nested content
-// (including the further-nested "♦ voorbeelden" label div) comes back as
-// one balanced unit, then taking the first <li> within it (safe to match
-// with a plain, non-nesting-aware regex here - a <ul> of example <li>s has
-// no further nesting inside).  Searching only within senses[0], not the
-// whole entry, matters: a later sense may have its own, unrelated
-// class="ex" - verified against "boodschap", which has four senses, each
-// with its own separate example list.
-//
-// Returns ok=false if the first sense has no tagRe match at all (e.g. a
-// sense that's genuinely just usage notes) - the caller falls back to the
-// plain multi-sense extraction in that case, same as when tagRe finds
-// nothing in extractTagText.
-func extractCardEntry(word string, senses []string, tagRe *regexp.Regexp, cardFormat cardTemplate, dropLabels map[string]bool, article string) (definition, front string, ok bool) {
-	sense := stripLabelClasses(senses[0], dropLabels)
-
-	senseDivs := topLevelDivs(sense)
-	if len(senseDivs) == 0 {
-		senseDivs = []string{sense}
-	}
-
-	// class="tr" marks genuine translations; tagRe (translation_tag) also
-	// catches bolded grammar notes - the nl-de "instorten" entry bolds a
-	// case-government marker, which used to land on the card. Prefer the
-	// class where the dictionary provides it.
-	translations := extractTagList(senseDivs[0], trSpanRe)
-	if len(translations) == 0 && tagRe != nil {
-		translations = extractTagList(senseDivs[0], tagRe)
-	}
-	if len(translations) == 0 {
-		return "", "", false
-	}
-
-	var sourceExample, targetExample string
-	if loc := exDivOpenRe.FindStringIndex(sense); loc != nil {
-		if exDivs := topLevelDivs(sense[loc[0]:]); len(exDivs) > 0 {
-			if ex := liRe.FindStringSubmatch(exDivs[0]); ex != nil {
-				sourceExample, targetExample = splitExample(ex[1])
-			}
-		}
-	}
-
-	// The article belongs with the source-language headword - a learner needs
-	// "het huis", not "huis". It is deliberately not stripped by
-	// dict_strip_labels: that setting governs annotations *within* an entry,
-	// and this one has been promoted to part of the headword itself.
-	headword := word
-	if article != "" {
-		headword = article + " " + word
-	}
-
-	definition = formatCard(cardFormat, translations[0], translations[1:], targetExample)
-	front = formatCard(cardFormat, headword, nil, sourceExample)
-	return definition, front, true
-}
-
-// splitExample pulls one example's two halves out of its raw <li> content.
-//
-// The <br> always separates the source phrase from everything the entry has
-// to say about its translation, so the source half is bounded by it either
-// way. What differs is the target half:
-//
-//   - With class="t" markers (see CLASSES.md), take the *first* marked span.
-//     A bullet may carry several labelled alternatives - "(aan het licht
-//     brengen) X (publiciteit geven) Y" - and only the first belongs on a
-//     card. Any label sitting between the <br> and that span qualifies the
-//     translation, not the phrase, so it is left out of both halves.
-//   - Without them (a dictionary from another source, e.g. nl-en), fall
-//     back to taking everything after the <br>.
-//
-// Returns ("", "") when either half cleans down to nothing - a malformed or
-// unrecognized example is worth skipping, not worth showing broken.
-func splitExample(raw string) (source, target string) {
-	idx := strings.Index(strings.ToLower(raw), "<br")
-	if idx < 0 {
-		return "", ""
-	}
-	head, rest := raw[:idx], raw[idx:]
-	if gt := strings.Index(rest, ">"); gt >= 0 {
-		rest = rest[gt+1:]
-	}
-
-	source = cleanPlainText(head)
-	if m := targetSpanRe.FindStringSubmatch(rest); m != nil {
-		target = cleanPlainText(m[1])
-	} else {
-		target = cleanPlainText(rest)
-	}
-
-	if source == "" || target == "" {
-		return "", ""
-	}
-	return source, target
-}
-
-// extractTagText pulls the text content of every span matched by tagRe out
-// of htmlSrc, strips any tags/entities within each span, and joins the
-// results with ", " - e.g. turning "<i>inwerking</i><b>Einfluss</b><i>
-// (der</i>), <b>Einwirkung</b>..." into "Einfluss, Einwirkung" when tagRe
-// matches <b>. Returns "" if the tag has no matches (caller falls back to
-// cleanText in that case, rather than silently emitting a blank card).
-//
-// Known accepted limitation: this assumes the tag is used exclusively for
-// the translation, which is true for the vast majority of entries but not
-// guaranteed - verified against dicthtml-nl-de.zip's "instorten" (second
-// sense), where the source dict itself also bolds case-government notes
-// ("<b> (in</b><i> (+ 4e naamval)</i><b>)</b>"), so those leak through
-// too. Not fixable by pattern matching alone (would need to distinguish
-// "bold = translation" from "bold = grammar note" semantically); rare
-// enough in practice not to be worth chasing further.
-func extractTagText(htmlSrc string, tagRe *regexp.Regexp) string {
-	return strings.Join(extractTagList(htmlSrc, tagRe), ", ")
-}
-
-// extractTagList is extractTagText's list form - same extraction, unjoined -
-// so extractCardEntry can treat the first match as the headword and the rest
-// as alternatives (formatCard's shape) instead of one flat string.
-func extractTagList(htmlSrc string, tagRe *regexp.Regexp) []string {
-	var parts []string
-	for _, m := range tagRe.FindAllStringSubmatch(htmlSrc, -1) {
-		inner := htmlTagRe.ReplaceAllString(m[1], " ")
-		inner = html.UnescapeString(inner)
-		inner = strings.ReplaceAll(inner, " ", " ")
-		inner = whitespaceRe.ReplaceAllString(inner, " ")
-		inner = strings.TrimSpace(inner)
-		if inner != "" {
-			parts = append(parts, inner)
-		}
-	}
-	return parts
-}
-
 // cleanPlainText strips all tags to bare text with no Markdown conversion,
-// unlike cleanText - for extractCardEntry's example halves, which get their
-// own outer *italic* wrapping from formatCard. Converting an inner
+// unlike cleanText - for a card's example halves, which get their own outer
+// *italic* wrapping from formatCard. Converting an inner
 // "<i>(note)</i>" to markdown too, as cleanText would, nests emphasis
 // markers into broken output like "**(ook)* text*" - verified against
 // "verschrikkelijk"'s second sense, whose German half opens with a bare
@@ -1364,50 +1137,6 @@ func toMarkdown(s string) string {
 }
 
 func isMDSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\n' }
-
-var divTagRe = regexp.MustCompile(`(?i)<div[^>]*>|</div>`)
-var liTagRe = regexp.MustCompile(`(?i)<li[^>]*>|</li>`)
-
-// topLevelTags returns the inner HTML of each element matched by tagRe that
-// is a direct child (depth 0) of the given fragment, skipping over any
-// further nested occurrences of the same tag - e.g. an examples <div> that
-// itself contains a label <div>, or a sense <li> whose own example list is
-// itself a further-nested <ul><li>...</li></ul> (verified against
-// dicthtml-nl-de.zip: a naive non-depth-aware <li>...</li> match, as used
-// here previously, matches the FIRST </li> it finds regardless of nesting -
-// which for a sense followed by "<div class=\"ex\"><ul><li>example</li>...",
-// is the closing tag of the first example bullet, not the sense's own
-// closing tag. That silently truncated every "sense" to end mid-example,
-// and flattened every example bullet in a dict_examples-relevant word's
-// example list into what looked like separate top-level senses (e.g.
-// "boodschap" appeared to have 19 senses; it has 4, each with its own
-// example list of varying length. Only ever exposed at max_senses>1 - the
-// default max_senses=1 always uses just the first, correctly-bounded sense
-// anyway, coincidentally masking the bug in what was already deployed).
-func topLevelTags(html string, tagRe *regexp.Regexp) []string {
-	var result []string
-	depth := 0
-	start := -1
-	for _, m := range tagRe.FindAllStringIndex(html, -1) {
-		tag := html[m[0]:m[1]]
-		if strings.HasPrefix(tag, "</") {
-			depth--
-			if depth == 0 && start >= 0 {
-				result = append(result, html[start:m[0]])
-				start = -1
-			}
-		} else {
-			if depth == 0 {
-				start = m[1]
-			}
-			depth++
-		}
-	}
-	return result
-}
-
-func topLevelDivs(html string) []string { return topLevelTags(html, divTagRe) }
-func topLevelLis(html string) []string  { return topLevelTags(html, liTagRe) }
 
 // truncateMarkdownVisible truncates s to roughly maxChars visible (non-'*')
 // characters, extending the cut to the next word boundary with a balanced

@@ -300,6 +300,33 @@ of the entries it produces), run:
 kobo-vocab -test-dict path/to/dicthtml-xx-yy.zip
 ```
 
+### Dictionary profiles
+
+The Kobo format fixes the outside of a dictionary but not the inside, and generators
+disagree about everything there: where the translation sits, whether senses are numbered,
+which half of an example is the foreign one. That structure is described by a **profile** —
+a handful of CSS selectors held as config data — rather than by branches in the parser, so a
+dictionary this project has never seen is supported by writing a config section instead of
+patching code.
+
+Four profiles ship: `vandale` (this project's own build — everything explicitly marked),
+`flat` (StarDict-style conversions with no markup, where the gloss is found by position),
+`nested` (numbered senses and nothing else), and `wikdict`
+([download.wikdict.com](https://download.wikdict.com), a good free source to point at).
+
+Normally you configure nothing: the profile is detected from the markup.
+`-test-dict` prints which one was chosen, and prints it back as config you can paste and
+adjust; `-print-config` lists the profile in force for every dictionary in `dict_dir`. To
+pin or correct one, add a section keyed by language pair:
+
+```ini
+[dict:de-fr]
+profile=wikdict
+example=div.ex ul li     # keep the base profile, override one selector
+```
+
+See `anki-mywords.conf.example` for the full key list and the selector syntax.
+
 ## Checking your configuration
 
 Config files never fail to load: a setting that can't be used keeps its default and the rest
