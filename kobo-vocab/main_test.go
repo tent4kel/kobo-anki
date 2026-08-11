@@ -299,11 +299,11 @@ func TestExtractEntryCardWithExample(t *testing.T) {
 	if word != "afspraak" {
 		t.Errorf("word = %q, want afspraak", word)
 	}
-	wantDef := "**Verabredung**\nVereinbarung\n*eine Verabredung treffen*"
+	wantDef := "**Verabredung**\n\nVereinbarung\n\n*eine Verabredung treffen*"
 	if def != wantDef {
 		t.Errorf("def = %q, want %q", def, wantDef)
 	}
-	wantFront := "**afspraak**\n*een afspraak maken*"
+	wantFront := "**afspraak**\n\n*een afspraak maken*"
 	if front != wantFront {
 		t.Errorf("front = %q, want %q", front, wantFront)
 	}
@@ -365,7 +365,7 @@ func TestExtractEntryCardExampleWithInlineAnnotationDoesNotNestMarkdown(t *testi
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	want := "**schrecklich**\n*(ook) verheerende Folgen*"
+	want := "**schrecklich**\n\n*(ook) verheerende Folgen*"
 	if def != want {
 		t.Errorf("def = %q, want %q (no nested/unbalanced emphasis markers)", def, want)
 	}
@@ -751,11 +751,11 @@ func TestExtractCardEntryPrefersClassMarkers(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	wantDef := "**hineinstürzen**\nstürzen\n*etwas an die Öffentlichkeit bringen*"
+	wantDef := "**hineinstürzen**\n\nstürzen\n\n*etwas an die Öffentlichkeit bringen*"
 	if def != wantDef {
 		t.Errorf("def  = %q\nwant = %q", def, wantDef)
 	}
-	wantFront := "**test**\n*iets openbaar maken*"
+	wantFront := "**test**\n\n*iets openbaar maken*"
 	if front != wantFront {
 		t.Errorf("front = %q\nwant  = %q", front, wantFront)
 	}
@@ -775,10 +775,10 @@ func TestExtractCardEntryFallsBackWithoutClasses(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ok=true")
 	}
-	if def != "**Verabredung**\nAbmachung\n*eine Verabredung treffen*" {
+	if def != "**Verabredung**\n\nAbmachung\n\n*eine Verabredung treffen*" {
 		t.Errorf("def = %q", def)
 	}
-	if front != "**test**\n*een afspraak maken*" {
+	if front != "**test**\n\n*een afspraak maken*" {
 		t.Errorf("front = %q", front)
 	}
 }
@@ -857,10 +857,10 @@ func TestExtractCardEntryWorksWithoutTranslationTag(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ok=true with tagRe nil")
 	}
-	if def != "**Haus**\n*ein schönes Haus*" {
+	if def != "**Haus**\n\n*ein schönes Haus*" {
 		t.Errorf("def = %q", def)
 	}
-	if front != "**het huis**\n*een mooi huis*" {
+	if front != "**het huis**\n\n*een mooi huis*" {
 		t.Errorf("front = %q", front)
 	}
 }

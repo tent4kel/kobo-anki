@@ -24,15 +24,19 @@ const (
 
 // FontCache parses each font file at most once and caches the derived
 // xfont.Face per (path, size) pair, since faces get requested repeatedly
-// across draw calls within and across screens.
+// across draw calls within and across screens. The font's ligature table
+// is derived once alongside the parse - it depends on the file, not on the
+// point size, and reading GSUB is not something to redo per draw call.
 type FontCache struct {
 	mu     sync.Mutex
 	parsed map[string]*opentype.Font
+	ligs   map[string]*ligatureTable
 	faces  map[string]xfont.Face
 }
 
 var fontCache = &FontCache{
 	parsed: make(map[string]*opentype.Font),
+	ligs:   make(map[string]*ligatureTable),
 	faces:  make(map[string]xfont.Face),
 }
 
@@ -40,27 +44,30 @@ var fontCache = &FontCache{
 // size, parsing and caching the underlying font the first time it's seen.
 // This uses golang.org/x/image/font/opentype - a genuine pure-Go TrueType
 // and OpenType rasterizer (vector outlines, not bitmaps), not a downgrade
-// from FBInk's FreeType-backed rendering.
-func (fc *FontCache) Face(path string, size float64) (xfont.Face, error) {
+// from FBInk's FreeType-backed rendering. The font's ligature table comes
+// back with it (nil if the font declares none this package can reach); see
+// ligature.go for why that is read here rather than shaped at draw time.
+func (fc *FontCache) Face(path string, size float64) (xfont.Face, *ligatureTable, error) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
 	key := fmt.Sprintf("%s@%.2f@%d", path, size, screenDPI)
 	if f, ok := fc.faces[key]; ok {
-		return f, nil
+		return f, fc.ligs[path], nil
 	}
 
 	parsed, ok := fc.parsed[path]
 	if !ok {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		parsed, err = opentype.Parse(data)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		fc.parsed[path] = parsed
+		fc.ligs[path] = buildLigatures(data, parsed)
 	}
 
 	// DPI must match the panel's real density, or Size (in points) rasterizes
@@ -72,10 +79,10 @@ func (fc *FontCache) Face(path string, size float64) (xfont.Face, error) {
 		Hinting: xfont.HintingFull,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fc.faces[key] = face
-	return face, nil
+	return face, fc.ligs[path], nil
 }
 
 // makeFaceResolver builds a faceResolver for the given FontType/size,
@@ -90,11 +97,14 @@ func makeFaceResolver(ft FontType, size int) faceResolver {
 		if path == "" {
 			return resolvedFace{}, fmt.Errorf("no font configured for font type %v", ft)
 		}
-		face, err := fontCache.Face(path, float64(size))
+		face, ligs, err := fontCache.Face(path, float64(size))
 		if err != nil {
 			return resolvedFace{}, err
 		}
-		return resolvedFace{Face: face, SynthBold: synthBold}, nil
+		if !activeStyle.Ligatures {
+			ligs = nil
+		}
+		return resolvedFace{Face: face, SynthBold: synthBold, Ligatures: ligs}, nil
 	}
 }
 
@@ -116,4 +126,17 @@ func scaledLineHeight(face xfont.Face) int {
 // lines apart from each other, not the first line's position.
 func faceAscent(face xfont.Face) int {
 	return face.Metrics().Ascent.Round()
+}
+
+// scaledBlockSpace is the extra gap drawn after a paragraph or list item,
+// as activeStyle.BlockSpacing line heights. It scales with the font rather
+// than being a pixel constant, so it stays proportionate across the size
+// range a deck override can ask for. A negative multiplier would pull the
+// next block upward into this one, so it is clamped away.
+func scaledBlockSpace(face xfont.Face) int {
+	mult := activeStyle.BlockSpacing
+	if mult <= 0 {
+		return 0
+	}
+	return int(float64(scaledLineHeight(face)) * mult)
 }

@@ -105,7 +105,7 @@ chatgpt_max_alternatives=3
 # another line break, then the italic example - each on its own line, with
 # any missing piece (no alternatives, no example) simply not leaving a line
 # behind rather than an empty gap.
-card_format=[**{head}**][\n{alts}][\n*{ex}*]
+card_format=[**{head}**][\n\n{alts}][\n\n*{ex}*]
 
 # Which annotations to remove from card text, for dictionaries whose entries
 # carry them as typed classes (see CLASSES.md next to the dict extractor):

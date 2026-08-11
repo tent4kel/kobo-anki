@@ -122,6 +122,8 @@ size_title=24
 size_card=28
 size_menu=16
 line_height=1.0             # multiplier on the font's natural line height
+block_spacing=0.5           # extra line heights after a paragraph or list item
+ligatures=true              # draw the font's own fi/fl/ff/ffi/ffl ligatures
 margin=0                    # pixels inset around the front/back card content area
 darkmode=false
 touch_cooldown=300
@@ -149,7 +151,44 @@ call, instead of shelling out to `fbink` once per label/button. Card front/back
 text is parsed as Markdown (bold/italic/lists — see `kobo-vocab` below) via
 [goldmark](https://github.com/yuin/goldmark) and rendered with real mixed-style
 line-wrapping. List lines always render left-aligned regardless of the
-surrounding block's alignment, since a centered bullet list reads badly.
+surrounding block's alignment, since a centered bullet list reads badly, and
+wrap with a hanging indent so a long item's continuation lines stay in one
+column instead of running back under their own bullet.
+
+**Block spacing**: `block_spacing` (default `0.5`) adds that fraction of a
+line height after every paragraph and every list item, so consecutive senses
+read as separate entries rather than one run-on. It follows Markdown's own
+rule for what a paragraph is — a *blank* line. A single newline is a soft
+break and stays tight, which is why the default `card_format` separates
+headword, alternatives and example with blank lines: that is what makes them
+eligible for the gap. Wrapped continuation lines are never spaced. No space
+is added after the final block, since trailing space would only push
+vertically centred text off centre.
+
+**Typography**: `x/image` applies real kerning — it reads GPOS pair
+positioning (and the legacy `kern` table) for Latin text, and both the
+measuring and drawing paths use it, so wrapping agrees with what lands on the
+panel. Kerning does need a *static* font file: an unflattened variable font's
+GPOS reads as zero kerning for every pair, so put a static instance in
+`font_dir`.
+
+What `x/image` does *not* do is GSUB shaping, so the font's ligature glyphs
+are never reached on their own. `ligature.go` closes that gap for the Latin
+f-ligatures without pulling in a shaping engine: it reads the font's own
+`liga` feature out of GSUB, keeps the substitutions whose result glyph is
+also reachable as a Unicode presentation form (`U+FB00`–`U+FB06`), and
+rewrites the text before measuring and drawing it. For text fonts that is the
+whole `liga` set — verified against Newsreader and DejaVu Serif, where all
+five (ff, fi, fl, ffi, ffl) round-trip. A font declaring no ligatures gets
+none: Go Regular ships the `fi`/`fl` glyphs but no `liga` feature, and is
+correctly left alone. Switch it off per deck with `ligatures=false` — German
+suppresses ligatures across morpheme boundaries (`Auf|lage`), which needs a
+hyphenation dictionary to detect.
+
+Beyond that lies genuine shaping — contextual alternates, mark positioning,
+non-Latin scripts, ligatures with no codepoint — which would mean moving the
+draw path onto [go-text/typesetting](https://github.com/go-text/typesetting)
+(pure Go, no cgo, ARM-clean). Nothing in this app currently needs it.
 
 ### anki-mywords.conf
 

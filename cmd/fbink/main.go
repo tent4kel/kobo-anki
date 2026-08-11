@@ -135,11 +135,12 @@ func fbinkTextRect(r Rect, text string, ft FontType, size int, color string, ali
 
 	lineHeight := scaledLineHeight(regular.Face)
 	ascent := faceAscent(regular.Face)
+	blockSpace := scaledBlockSpace(regular.Face)
 	target := r
 	if centerV {
-		target = centerRectV(r, len(lines)*lineHeight)
+		target = centerRectV(r, blockHeight(lines, lineHeight, blockSpace))
 	}
-	drawLines(canvas, lines, target, resolve, colorToGray(color), lineHeight, ascent, align)
+	drawLines(canvas, lines, target, resolve, colorToGray(color), lineHeight, ascent, blockSpace, align)
 }
 
 // centerRectV returns r shifted down so content of height contentH is
@@ -257,7 +258,14 @@ var (
 		SizeCard:   28,
 		SizeMenu:   16,
 		LineHeight: 1.0, // 1.0 = font's natural metrics height, unchanged from before this setting existed
-		Margin:     0,   // 0 = unchanged from before this setting existed (content area runs edge to edge)
+		// Half a line between senses. Dictionary backs are lists of separate
+		// meanings; run together they read as one sentence.
+		BlockSpacing: 0.5,
+		Margin:       0, // 0 = unchanged from before this setting existed (content area runs edge to edge)
+		// On by default: a font that declares no ligatures is unaffected, and
+		// one that does was drawn wrong without them. Off is for German decks,
+		// where ligating across a morpheme boundary (auf|lage) is an error.
+		Ligatures: true,
 	}
 
 	// deckOverrides holds per-[deck:NAME] style overrides parsed from
@@ -292,8 +300,10 @@ type Style struct {
 	SizeCard        int
 	SizeMenu        int
 	LineHeight      float64 // multiplier on the font's natural line height
+	BlockSpacing    float64 // extra line heights after a paragraph or list item
 	Margin          int     // pixels inset on all sides of the content area
 	DarkMode        bool
+	Ligatures       bool // substitute the font's own f-ligatures (see ligature.go)
 }
 
 // StyleOverride is a [deck:NAME] section: every field is a pointer so a
@@ -314,8 +324,10 @@ type StyleOverride struct {
 	SizeCard        *int
 	SizeMenu        *int
 	LineHeight      *float64
+	BlockSpacing    *float64
 	Margin          *int
 	DarkMode        *bool
+	Ligatures       *bool
 }
 
 // effectiveStyle merges any [deck:deckName] override on top of the global
@@ -377,11 +389,17 @@ func applyStyleOverride(s Style, o *StyleOverride) Style {
 	if o.LineHeight != nil {
 		s.LineHeight = *o.LineHeight
 	}
+	if o.BlockSpacing != nil {
+		s.BlockSpacing = *o.BlockSpacing
+	}
 	if o.Margin != nil {
 		s.Margin = *o.Margin
 	}
 	if o.DarkMode != nil {
 		s.DarkMode = *o.DarkMode
+	}
+	if o.Ligatures != nil {
+		s.Ligatures = *o.Ligatures
 	}
 	return s
 }
@@ -514,6 +532,10 @@ func applyStyleKey(o *StyleOverride, key, value string, lineNo int, warn *core.C
 		if v, ok := warn.Float(lineNo, key, value); ok {
 			o.LineHeight = &v
 		}
+	case "block_spacing":
+		if v, ok := warn.Float(lineNo, key, value); ok {
+			o.BlockSpacing = &v
+		}
 	case "margin":
 		if v, ok := warn.Int(lineNo, key, value); ok {
 			o.Margin = &v
@@ -521,6 +543,10 @@ func applyStyleKey(o *StyleOverride, key, value string, lineNo int, warn *core.C
 	case "darkmode":
 		if v, ok := warn.Bool(lineNo, key, value); ok {
 			o.DarkMode = &v
+		}
+	case "ligatures":
+		if v, ok := warn.Bool(lineNo, key, value); ok {
+			o.Ligatures = &v
 		}
 	default:
 		warn.UnknownKey(lineNo, key)

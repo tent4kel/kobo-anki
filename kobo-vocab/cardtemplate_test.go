@@ -14,10 +14,10 @@ func TestCardTemplateDefault(t *testing.T) {
 		example      string
 		want         string
 	}{
-		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**\nstappen, wandelen\n*Zij liepen.*"},
+		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**\n\nstappen, wandelen\n\n*Zij liepen.*"},
 		{"headword only", "lopen", nil, "", "**lopen**"},
-		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen**\n*Zij liepen.*"},
-		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**\nstappen"},
+		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen**\n\n*Zij liepen.*"},
+		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**\n\nstappen"},
 		{"everything empty", "", nil, "", ""},
 	}
 	for _, c := range cases {

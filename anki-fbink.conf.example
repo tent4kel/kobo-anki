@@ -23,9 +23,33 @@ size_menu=16
 # for 20% extra spacing between lines). 1.0 = font's own metrics, unchanged.
 line_height=1.0
 
+# Extra vertical space after a paragraph or a list item, as a multiple of
+# the line height. 0.5 = half a blank line between senses; 0 = the old
+# behaviour, everything set solid.
+#
+# This follows Markdown's own rule for what a paragraph is: a BLANK line.
+# A single newline is a soft break and stays tight, which is what keeps a
+# card's headword, alternatives and example from drifting apart when you
+# don't want them to. See card_format in anki-mywords.conf.example - the
+# default template separates those three with blank lines precisely so this
+# setting applies to them.
+block_spacing=0.5
+
 # Margin in pixels around the card content area (front/back text).
 # 0 = content runs edge to edge, as before this setting existed.
 margin=0
+
+# Draw the font's own f-ligatures (fi, fl, ff, ffi, ffl) as single glyphs
+# instead of as separate letters. Read out of the font's GSUB table, so a
+# font that declares no ligatures is unaffected either way, and no ligature
+# the designer did not ask for is ever invented.
+#
+# Turn this off for German: German typography suppresses ligatures across a
+# morpheme boundary, so "Auflage" (auf+lage) and "Kaufleute" (Kauf+leute)
+# should NOT ligate, and deciding which "fl" is which needs a hyphenation
+# dictionary this app does not carry. Turkish must not ligate fi at all.
+# Per-deck is the useful granularity here - see [deck:NAME] below.
+ligatures=true
 
 # Display
 darkmode=false
@@ -34,7 +58,8 @@ darkmode=false
 touch_cooldown=300
 
 # Optional: per-deck overrides. Any of the keys above (font_*, size_*,
-# line_height, margin, darkmode) can be overridden for one specific deck -
+# line_height, block_spacing, margin, darkmode, ligatures) can be overridden
+# for one specific deck -
 # the deck name is the CSV filename without ".csv" (e.g. words/vocab-nl-de.csv
 # -> "vocab-nl-de"). Only applies to the front/back card screens, not the
 # deck list or other chrome. Unset keys fall back to the global defaults
@@ -43,6 +68,7 @@ touch_cooldown=300
 # [deck:vocab-nl-de]
 # size_card=32
 # line_height=1.3
+# ligatures=false
 #
 # [deck:vocab-ja-en]
 # font_back=NotoSansJP-Regular.ttf

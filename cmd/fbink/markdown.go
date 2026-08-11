@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -15,11 +16,8 @@ import (
 // fbinkTextRect uses for plain text - only the input side differs (parsed
 // Markdown structure instead of a naive whitespace split). Only the
 // Markdown kobo-vocab actually emits is handled: **bold**/*italic* (nested
-// arbitrarily), "- " tight lists, and line breaks. List items get a
-// leading "- " baked onto their first word rather than a true hanging
-// indent on wrapped continuation lines - simpler to implement correctly
-// and still visually distinguishes list items; a real hanging indent would
-// need wrapWords/drawLines to carry per-line indent state.
+// arbitrarily), "- " tight lists, and line breaks. List items are wrapped
+// with a hanging indent - see bulletMarker and wrapWords.
 func markdownToWords(src []byte) []styledWord {
 	doc := goldmark.DefaultParser().Parse(text.NewReader(src))
 	w := &mdWalker{source: src}
@@ -51,8 +49,11 @@ func (w *mdWalker) walkBlock(n ast.Node) {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		switch node := c.(type) {
 		case *ast.Paragraph, *ast.TextBlock:
+			// Both cases end a block: a Paragraph is one, and a TextBlock is
+			// the body of a tight list item. Newlines *within* either are
+			// emitted by walkInline as plain line breaks instead.
 			w.walkInline(c)
-			w.words = append(w.words, styledWord{text: "\n"})
+			w.words = append(w.words, styledWord{text: "\n", brk: breakBlock})
 		case *ast.List:
 			w.walkList(node)
 		default:
@@ -61,21 +62,32 @@ func (w *mdWalker) walkBlock(n ast.Node) {
 	}
 }
 
+// bulletMarker is the list marker drawn in place of Markdown's "- ". It is
+// emitted as a word of its own rather than glued onto the item's first
+// word, so wrapWords can measure it and hang the item's wrapped lines at
+// its width (see wrapWords); a baked-in prefix is unmeasurable once it has
+// been concatenated, which is why wrapped items used to run back under
+// their own bullet.
+const bulletMarker = "-"
+
 func (w *mdWalker) walkList(list *ast.List) {
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		before := len(w.words)
 		w.walkBlock(item)
-		// Mark every word from this item as list content (forces its line
-		// to render left-aligned, see drawLines) and bake a leading "- "
-		// onto just the first non-break word.
-		prefixed := false
+		if len(w.words) == before {
+			continue
+		}
+		// Mark every word from this item as list content, which forces its
+		// line to render left-aligned (see drawLines).
 		for i := before; i < len(w.words); i++ {
 			w.words[i].isListItem = true
-			if !prefixed && w.words[i].text != "\n" {
-				w.words[i].text = "- " + w.words[i].text
-				prefixed = true
-			}
 		}
+		w.words = slices.Insert(w.words, before, styledWord{
+			text:       bulletMarker,
+			style:      StyleRegular,
+			isListItem: true,
+			isBullet:   true,
+		})
 	}
 }
 
@@ -88,7 +100,10 @@ func (w *mdWalker) walkInline(n ast.Node) {
 				w.words = append(w.words, styledWord{text: word, style: w.style()})
 			}
 			if node.SoftLineBreak() || node.HardLineBreak() {
-				w.words = append(w.words, styledWord{text: "\n"})
+				// A newline inside a paragraph - what separates a card's
+				// headword from its alternatives and example. Those stay
+				// tight; only block ends get extra space.
+				w.words = append(w.words, styledWord{text: "\n", brk: breakLine})
 			}
 		case *ast.Emphasis:
 			if node.Level >= 2 {
@@ -110,15 +125,24 @@ func (w *mdWalker) walkInline(n ast.Node) {
 
 // trimBreaks drops leading/trailing/duplicate line-break markers so a
 // document's outer paragraph break doesn't produce a stray blank line.
+// Where breaks collapse, the strongest one wins: a list item ends with an
+// inline break immediately followed by its block break, and it is the block
+// break that has to survive or the item loses its spacing.
 func trimBreaks(words []styledWord) []styledWord {
 	var out []styledWord
 	for _, w := range words {
-		if w.text == "\n" && (len(out) == 0 || out[len(out)-1].text == "\n") {
-			continue
+		if w.brk != breakNone {
+			if len(out) == 0 {
+				continue
+			}
+			if prev := &out[len(out)-1]; prev.brk != breakNone {
+				prev.brk = max(prev.brk, w.brk)
+				continue
+			}
 		}
 		out = append(out, w)
 	}
-	for len(out) > 0 && out[len(out)-1].text == "\n" {
+	for len(out) > 0 && out[len(out)-1].brk != breakNone {
 		out = out[:len(out)-1]
 	}
 	return out
@@ -136,11 +160,12 @@ type wrappedBlock struct {
 	lines      []layoutLine
 	lineHeight int
 	ascent     int
+	blockSpace int
 	resolve    faceResolver
 }
 
 func (b wrappedBlock) height() int {
-	return len(b.lines) * b.lineHeight
+	return blockHeight(b.lines, b.lineHeight, b.blockSpace)
 }
 
 // wrapMarkdown parses and word-wraps Markdown text for the given
@@ -160,6 +185,7 @@ func wrapMarkdown(md string, ft FontType, size, maxWidth int) (wrappedBlock, err
 		lines:      lines,
 		lineHeight: scaledLineHeight(regular.Face),
 		ascent:     faceAscent(regular.Face),
+		blockSpace: scaledBlockSpace(regular.Face),
 		resolve:    resolve,
 	}, nil
 }
@@ -172,7 +198,7 @@ func (b wrappedBlock) draw(r Rect, gray uint8, align Align, centerV bool) {
 	if centerV {
 		target = centerRectV(r, b.height())
 	}
-	drawLines(canvas, b.lines, target, b.resolve, gray, b.lineHeight, b.ascent, align)
+	drawLines(canvas, b.lines, target, b.resolve, gray, b.lineHeight, b.ascent, b.blockSpace, align)
 }
 
 // drawMarkdownLabel wraps and draws Markdown-formatted card content

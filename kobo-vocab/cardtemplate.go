@@ -6,12 +6,15 @@ import (
 	"strings"
 )
 
-// DefaultCardFormat: bold headword, a line break, comma-joined
-// alternatives, another line break, then the italic example - three lines,
-// each bracketed part dropped independently (no blank line left behind
-// when its own placeholder is empty, e.g. no example means the last line
-// just isn't there rather than an empty trailing line).
-const DefaultCardFormat = "[**{head}**][\n{alts}][\n*{ex}*]"
+// DefaultCardFormat: bold headword, comma-joined alternatives, then the
+// italic example - each its own Markdown paragraph (a blank line between,
+// not a single newline), so the renderer puts block_spacing between them
+// and the three read as separate things. A single newline is only a soft
+// break in Markdown and would set them solid.
+//
+// Each bracketed part is dropped independently, so an absent example means
+// the paragraph simply isn't there rather than leaving a trailing gap.
+const DefaultCardFormat = "[**{head}**][\n\n{alts}][\n\n*{ex}*]"
 
 // cardTemplate is a compiled card_format string - see parseCardTemplate.
 // Compile once per provider/dict construction, not per word: dict lookups

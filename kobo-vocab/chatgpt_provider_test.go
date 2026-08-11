@@ -81,11 +81,11 @@ func TestChatGPTProviderFullLookup(t *testing.T) {
 		t.Errorf("system prompt should name the languages, got: %s", gotMessages[0].Content)
 	}
 
-	wantFront := "**lopen**\nstappen, wandelen\n*Zij liepen naar school.*"
+	wantFront := "**lopen**\n\nstappen, wandelen\n\n*Zij liepen naar school.*"
 	if e.Front != wantFront {
 		t.Errorf("Front = %q, want %q", e.Front, wantFront)
 	}
-	wantBack := "**laufen**\ngehen, rennen\n*Sie liefen zur Schule.*"
+	wantBack := "**laufen**\n\ngehen, rennen\n\n*Sie liefen zur Schule.*"
 	if e.Definition != wantBack {
 		t.Errorf("Definition = %q, want %q", e.Definition, wantBack)
 	}
@@ -140,10 +140,10 @@ func TestChatGPTProviderCapsAlternatives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if e.Front != "**gaan**\na, b, c" {
+	if e.Front != "**gaan**\n\na, b, c" {
 		t.Errorf("Front = %q, want alternatives capped at 3 (maxAlternatives passed to constructor)", e.Front)
 	}
-	if e.Definition != "**gehen**\n1, 2, 3" {
+	if e.Definition != "**gehen**\n\n1, 2, 3" {
 		t.Errorf("Definition = %q, want alternatives capped at 3", e.Definition)
 	}
 }
@@ -186,10 +186,10 @@ func TestFormatCard(t *testing.T) {
 		example      string
 		want         string
 	}{
-		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**\nstappen, wandelen\n*Zij liepen.*"},
+		{"all present", "lopen", []string{"stappen", "wandelen"}, "Zij liepen.", "**lopen**\n\nstappen, wandelen\n\n*Zij liepen.*"},
 		{"headword only", "lopen", nil, "", "**lopen**"},
-		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen**\n*Zij liepen.*"},
-		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**\nstappen"},
+		{"headword and example, no alternatives", "lopen", nil, "Zij liepen.", "**lopen**\n\n*Zij liepen.*"},
+		{"headword and alternatives, no example", "lopen", []string{"stappen"}, "", "**lopen**\n\nstappen"},
 		{"everything empty", "", nil, "", ""},
 	}
 	for _, c := range cases {

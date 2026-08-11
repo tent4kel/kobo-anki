@@ -77,13 +77,13 @@ func TestLexicalaProviderFullLookup(t *testing.T) {
 	// Same theme as ChatGPTProvider: bold headword, plain alternatives,
 	// italic example. Back: primary translation bold, remaining 2
 	// alternatives plain, translated example italic.
-	wantDef := "**laufen**\ngehen, rennen\n*Von hier aus ist es eine Viertelstunde zu gehen.*"
+	wantDef := "**laufen**\n\ngehen, rennen\n\n*Von hier aus ist es eine Viertelstunde zu gehen.*"
 	if e.Definition != wantDef {
 		t.Errorf("Definition = %q, want %q", e.Definition, wantDef)
 	}
 	// Front: source-language lemma bold, untranslated example italic - no
 	// alternatives segment (see Lookup's doc comment on why).
-	wantFront := "**lopen**\n*Het is een kwartiertje lopen hiervandaan.*"
+	wantFront := "**lopen**\n\n*Het is een kwartiertje lopen hiervandaan.*"
 	if e.Front != wantFront {
 		t.Errorf("Front = %q, want %q", e.Front, wantFront)
 	}
