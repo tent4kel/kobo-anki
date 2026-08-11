@@ -20,12 +20,27 @@ db=/mnt/onboard/.kobo/KoboReader.sqlite
 auto_parse=false
 
 # Definition length controls, for dictionaries with rich/nested entries
-# (multiple senses, example sentences, etc.):
-#   max_senses=1   how many senses (<li> entries) to include per word
-#   max_depth=1    how many direct sub-blocks to keep within each sense —
-#                  the first is always the core gloss; a second is usually
-#                  an example-sentence block, so max_depth=1 drops examples
-#   max_chars=150  hard cap on definition length as a safety net
+# (multiple senses, example sentences, etc.). Which of these actually bite
+# depends on the dictionary's profile - see [dict:xx-yy] near the bottom:
+#   max_senses=1   how many senses to include per word. A "sense" is
+#                  whatever the profile's sense= selector matches ("ol > li"
+#                  for vandale/nested/wikdict; the flat profile has no
+#                  senses at all). Two or more senses render as a "- " list.
+#                  NOT used when a themed card is built - that is
+#                  dict_examples=true on any profile except flat - because a
+#                  card carries one example and that does not compose with a
+#                  multi-sense list, so the first sense wins outright.
+#   max_depth=1    how many direct sub-blocks to keep within each sense: the
+#                  first is the core gloss, a second is usually an
+#                  example-sentence block, so max_depth=1 drops examples.
+#                  Only consulted when the definition is built from those
+#                  blocks, i.e. on the flat profile or for a sense whose
+#                  translation= selectors matched nothing. Where they did
+#                  match, the definition comes from the translations instead
+#                  and this setting has no effect.
+#   max_chars=150  hard cap as a safety net, applied to the card front as
+#                  well as to the definition. Counts visible characters, so
+#                  the * and ** of Markdown emphasis don't eat into it.
 max_senses=1
 max_depth=1
 max_chars=150
@@ -39,8 +54,22 @@ max_chars=150
 #              APIs/ directory - gitignored, never committed) and is
 #              limited to ~50 calls/day, so it's meant as a fallback for
 #              words the local dict misses, not a primary source.
-#   mymemory   free machine-translation API, no credentials needed. Same
-#              role as the old api_fallback=true setting.
+#   pons       PONS online dictionary API (en.pons.com/p/online-dictionary/
+#              developers/api). A real edited dictionary rather than machine
+#              translation: one call returns the headword's senses plus
+#              example collocations, so cards get a front and back example
+#              like the local dict does. Needs credentials in APIs/pons.json
+#              (base_url + token). Free tier is 1000 queries/month with a
+#              separate daily cap. No budget is kept here: PONS sends no
+#              usage header and its month starts on an account-specific
+#              date, so instead the API's own "out of allowance" answer
+#              (HTTP 503) stands the provider down until the next day.
+#              Keep it after dict either way.
+#              Two things to know. PONS only has the language pairs it has -
+#              check https://api.pons.com/v1/dictionaries; there is a Dutch
+#              <-> German dictionary ("denl") but no Dutch <-> English one.
+#              And it does not lemmatize: an inflected "liepen" simply is not
+#              found, so leave dict (which stems) ahead of it.
 #   chatgpt    LLM-generated card: headword (dictionary form) + a few
 #              alternative meanings + one example sentence, on BOTH the
 #              front (source language) and back (target language, a
@@ -50,7 +79,7 @@ max_chars=150
 #              OpenAI itself - see chatgpt_provider.go for details.
 # Can also be set per-language below, overriding this default. Uncomment
 # to try the online providers as a fallback once your dicts are set up:
-# providers=dict,lexicala,mymemory,chatgpt
+# providers=dict,pons,lexicala,chatgpt
 providers=dict
 
 # CA bundle used for every network provider's TLS verification, appended to
@@ -60,13 +89,21 @@ providers=dict
 # unknown authority"), regardless of which provider or how valid its real
 # certificate is. cacert.pem (repo root, a standard CA bundle - not a
 # secret, safe to ship/commit) covers that case; only relevant if lexicala/
-# mymemory/chatgpt are in providers= above, since dict never touches the
+# pons/chatgpt are in providers= above, since dict never touches the
 # network.
 ca_cert=cacert.pem
 
 # Only read if "lexicala" is in providers= above. Relative paths resolve
 # against this config file's directory, same as dict_dir/db/out.
 lexicala_conf=APIs/lexicala.json
+
+# Only read if "pons" is in providers= above. The credentials file holds
+# base_url + token (see APIs/ directory, gitignored, never committed);
+# base_url is https://api.pons.com/v1/dictionary. A sibling
+# APIs/pons.state.json records the day the API last reported the allowance
+# spent, so the standdown survives between runs rather than costing another
+# call to rediscover. Delete that file to try again immediately.
+pons_conf=APIs/pons.json
 
 # Only read if "chatgpt" is in providers= above. chatgpt_conf is the
 # credentials file (base_url + token - see APIs/ directory, gitignored);
@@ -164,11 +201,23 @@ dict_strip_labels=gen,gram
 # sense=ol > li                 # what to loop over; omit if entries are flat
 # translation=b.tr | div > i    # fallback chain, first match wins
 # translation_reject=font.grammar  # matched inside a candidate = not a translation
+# translation_text=afterLastBR  # no markup to select: take the text after the
+#                               # last <br> instead. Only value accepted, and
+#                               # what makes a dictionary "flat" - a profile
+#                               # setting this builds no themed cards, since
+#                               # positional text cannot be split into a
+#                               # headword plus alternatives
 # example=div.ex ul li
 # example_target=span.t         # which half of the example is the target language
 # article=i.art                 # source-language article, promoted onto the headword
 # drop_tags=med,sport           # inline subject markers to delete before reading text
 # split_on=;                    # extra separator between translations, besides ","
+#
+# The last two describe the container rather than the contents, and the Kobo
+# format fixes both - you should never need them, but a non-conforming
+# generator can be accommodated:
+# entry=w                       # element wrapping one dictionary entry
+# head=a@name                   # "tag@attr" holding the headword
 #
 # The selector language is a small CSS subset and nothing more: tag names,
 # ".class", descendant and ">" child combinators, and ":nth-of-type(n)".

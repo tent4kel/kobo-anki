@@ -15,7 +15,7 @@ import (
 // /etc/ssl/certs/ca-certificates.crt on a real device), which makes Go's
 // default system-pool TLS verification reject every HTTPS certificate,
 // valid or not, identically across totally unrelated services (Lexicala,
-// MyMemory, and OpenAI all failed the same "signed by unknown authority"
+// PONS, and OpenAI all failed the same "signed by unknown authority"
 // way on that device). A missing/unreadable caCertPath degrades to
 // whatever the system pool alone provides - fine on a normal dev machine,
 // which is why provider tests (plain HTTP, no TLS involved at all) don't

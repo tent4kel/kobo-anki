@@ -25,7 +25,6 @@ type Config struct {
 	DictDir        string
 	DBPath         string
 	OutDir         string
-	APIFallback    bool
 	MaxSenses      int      // max senses (<li> entries) to include per word; 0 = unlimited
 	MaxDepth       int      // max direct-child <div> blocks to keep per sense (drops examples etc.); 0 = unlimited
 	MaxChars       int      // max characters of definition text per word; 0 = unlimited
@@ -34,6 +33,7 @@ type Config struct {
 	DictExamples   bool     // if true, nested-format entries try to build a ChatGPT/Lexicala-style card (bold headword + alternatives + one example, on both Front and Definition) from the dict's own example phrases. Verified against dicthtml-nl-de.zip only - see extractCardEntry. No effect without TranslationTag also set, and no effect on flat-format entries.
 	Providers      []string // content providers to try in order, e.g. []string{"dict", "lexicala"} - see provider.go
 	LexicalaConf   string   // path to Lexicala credentials JSON (base_url/token), only read if "lexicala" is in Providers
+	PonsConf       string   // path to PONS credentials JSON (base_url/token), only read if "pons" is in Providers
 	CACertPath     string   // path to a PEM CA bundle, appended to the system trust store for every network provider's TLS verification - see newHTTPClient. Needed on Kobo firmware that ships no CA bundle at all.
 
 	// CardFormat is the card_format template (see parseCardTemplate in
@@ -168,11 +168,11 @@ func loadConfig(path string) Config {
 		DictDir:      "dict",
 		DBPath:       "KoboReader.sqlite",
 		OutDir:       ".",
-		APIFallback:  false,
 		MaxSenses:    1,
 		MaxDepth:     1,
 		MaxChars:     150,
 		LexicalaConf: "APIs/lexicala.json",
+		PonsConf:     "APIs/pons.json",
 		CardFormat:   DefaultCardFormat,
 		CACertPath:   "cacert.pem",
 		// Gender and grammar markers - "(der)", "(4e naamval)" - are noise
@@ -351,9 +351,9 @@ func loadConfig(path string) Config {
 				// Read by start.sh (shell grep), not by this binary - listed
 				// here only so it isn't reported as an unknown setting.
 			case "api_fallback":
-				if v, ok := warn.Bool(lineNo, key, val); ok {
-					cfg.APIFallback = v
-				}
+				// Retired along with the mymemory provider it used to switch
+				// on. Still accepted so an old config doesn't trip the
+				// unknown-key warning; it no longer does anything.
 			case "max_senses":
 				if v, ok := warn.Int(lineNo, key, val); ok {
 					cfg.MaxSenses = v
@@ -380,6 +380,8 @@ func loadConfig(path string) Config {
 				cfg.Providers = splitProviders(val)
 			case "lexicala_conf":
 				cfg.LexicalaConf = val
+			case "pons_conf":
+				cfg.PonsConf = val
 			case "ca_cert":
 				cfg.CACertPath = val
 			case "chatgpt_conf":
@@ -404,14 +406,10 @@ func loadConfig(path string) Config {
 		}
 	}
 
-	// providers= not set at all: default to the pre-provider-chain behavior
-	// (dict only, plus MyMemory iff api_fallback=true) so existing configs
-	// keep working unchanged.
+	// providers= not set at all: local dict only, which is the one provider
+	// that needs no credentials and no network.
 	if cfg.Providers == nil {
 		cfg.Providers = []string{"dict"}
-		if cfg.APIFallback {
-			cfg.Providers = append(cfg.Providers, "mymemory")
-		}
 	}
 
 	// Resolve relative paths against config file directory
@@ -447,6 +445,9 @@ func loadConfig(path string) Config {
 	}
 	if !filepath.IsAbs(cfg.LexicalaConf) {
 		cfg.LexicalaConf = filepath.Join(confDir, cfg.LexicalaConf)
+	}
+	if !filepath.IsAbs(cfg.PonsConf) {
+		cfg.PonsConf = filepath.Join(confDir, cfg.PonsConf)
 	}
 	if !filepath.IsAbs(cfg.ChatGPTConf) {
 		cfg.ChatGPTConf = filepath.Join(confDir, cfg.ChatGPTConf)
@@ -739,6 +740,7 @@ func printEffectiveConfig(cfg Config) {
 	fmt.Printf("chatgpt      model=%s temperature=%v max_tokens=%d max_alternatives=%d conf=%s\n",
 		cfg.ChatGPTModel, cfg.ChatGPTTemperature, cfg.ChatGPTMaxTokens, cfg.ChatGPTMaxAlternatives, cfg.ChatGPTConf)
 	fmt.Printf("lexicala     conf=%s\n", cfg.LexicalaConf)
+	fmt.Printf("pons         conf=%s\n", cfg.PonsConf)
 
 	fmt.Printf("\n%-8s %-10s %-9s %-9s %-15s %-13s %s\n",
 		"lang", "max_senses", "max_depth", "max_chars", "translation_tag", "dict_examples", "providers")
@@ -847,10 +849,15 @@ const networkFailureThreshold = 3
 
 func newNamedProvider(cfg Config, name string) Provider {
 	switch name {
-	case "mymemory":
-		return NewCircuitBreaker(NewMyMemoryProvider(cfg.CACertPath), networkFailureThreshold)
 	case "lexicala":
 		p, err := NewLexicalaProvider(cfg.LexicalaConf, compileCardFormatOrDefault(cfg.CardFormat), cfg.CACertPath)
+		if err != nil {
+			log.Printf("Provider %q unavailable (%v), skipping", name, err)
+			return nil
+		}
+		return NewCircuitBreaker(p, networkFailureThreshold)
+	case "pons":
+		p, err := NewPonsProvider(cfg.PonsConf, compileCardFormatOrDefault(cfg.CardFormat), cfg.CACertPath)
 		if err != nil {
 			log.Printf("Provider %q unavailable (%v), skipping", name, err)
 			return nil

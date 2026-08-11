@@ -233,22 +233,47 @@ finds something wins. Built-in providers:
 
 | provider | cost | typical latency | notes |
 |---|---|---|---|
-| `dict` | free | instant | local `dicthtml-*.zip` (see [Dictionaries](#dictionaries)), fully offline. Always first. With `dict_examples=true`, builds the same headword+alternatives+example card shape as `lexicala`/`chatgpt` from the dict's own example phrases, for words it happens to illustrate - no API, no cost. |
+| `dict` | free | instant | local `dicthtml-*.zip` (see [Dictionaries](#dictionaries)), fully offline. Always first. With `dict_examples=true`, builds the same headword+alternatives+example card shape as `pons`/`lexicala`/`chatgpt` from the dict's own example phrases, for words it happens to illustrate - no API, no cost. |
+| `pons` | 1000 queries/month, plus a daily cap | ~0.7s | [PONS](https://en.pons.com/p/online-dictionary/developers/api) online dictionary — an edited dictionary, not machine translation, so one call yields senses *and* example collocations for both card faces; needs `APIs/pons.json`. Covers only the pairs PONS publishes (see below), and does not lemmatize, so keep `dict` ahead of it |
 | `lexicala` | ~50 calls/day (RapidAPI) | ~0.5s | online dictionary API; needs `APIs/lexicala.json` |
-| `mymemory` | free | ~1s | machine-translation API, no credentials needed |
 | `chatgpt` | per-token (OpenAI or any compatible endpoint) | ~1.3s | LLM-generated card: headword + a few alternative meanings + one example sentence, consistent on both the front (source language) and back (target language); needs `APIs/chatgpt.json` |
 
-See `anki-mywords.conf.example` for the full set of `chatgpt_*`/`lexicala_conf` keys and how
-to set `providers=` globally or per `[lang]` section.
+See `anki-mywords.conf.example` for the full set of `chatgpt_*`/`lexicala_conf`/`pons_conf`
+keys and how to set `providers=` globally or per `[lang]` section.
+
+**PONS language pairs**, as of 2026-08-11 (`GET https://api.pons.com/v1/dictionaries`, no
+credentials needed — check it rather than trusting this list, it is a snapshot). 54
+dictionaries: 52 bilingual plus two single-language German ones (`dede`, `dedx`). A key is
+the two language codes sorted alphabetically and run together, which is also what this
+provider builds from a language pair — `nl`+`de` → `denl`.
+
+- **Paired with German (29)**: `arde bgde csde dade deel deen dees defa defi defr dehr dehu
+  deis deit deja dela delb denl deno depl dept dero deru desk desl desr desv detr dezh`
+- **Not involving German (23)**: `bgen enes enfr enit enpl enpt enru ensl ensr enzh esfr
+  esit espl espt essl eszh frit frpl frsl frzh itpl itsl plru`
+
+Note what is absent: Dutch appears in exactly one dictionary, `denl`. There is
+**no Dutch↔English pair**, so a `nl-en` deck cannot use this provider at all — it will
+return `404` per word until the circuit breaker gives up for the run.
+
+`lexicala` keeps a daily call counter in a `*.state.json` beside its credentials, so repeated
+runs in a day share one budget rather than each assuming the whole allowance.
+
+`pons` deliberately keeps no counter. PONS sends no usage header, and its monthly window
+starts on an account-specific date, so any budget tracked locally would be counting against
+the wrong window — and a month is too long a window to be wrong about. Instead the API's own
+`503` ("out of allowance") stands the provider down until the next calendar day, persisted in
+`APIs/pons.state.json` so the standdown survives between runs. Worst case after a rollover is
+one wasted call per day. Delete that file to retry immediately.
 
 The card layout itself (`[**{head}**][, {alts}][ *{ex}*]` by default) is controlled by
-`card_format` - one shared template across `dict` (with `dict_examples=true`), `lexicala`,
-and `chatgpt`, so restyling it applies everywhere at once. `{head}`/`{alts}`/`{ex}` are the
+`card_format` - one shared template across `dict` (with `dict_examples=true`), `pons`,
+`lexicala`, and `chatgpt`, so restyling it applies everywhere at once. `{head}`/`{alts}`/`{ex}` are the
 placeholders; wrapping a chunk in `[...]` drops it entirely, not just blank, when every
 placeholder inside is empty - see the comment above `card_format` in
 `anki-mywords.conf.example` for the syntax.
 
-`lexicala`/`mymemory`/`chatgpt` all need working HTTPS, which some Kobo firmware can't do out
+`pons`/`lexicala`/`chatgpt` all need working HTTPS, which some Kobo firmware can't do out
 of the box - certain devices ship with no system CA store at all, so every TLS request fails
 with `x509: certificate signed by unknown authority` regardless of provider. `cacert.pem`
 (repo root, deployed automatically by `deploy-ftp.sh`) is a standard CA bundle appended to
@@ -258,6 +283,11 @@ whatever trust store the OS provides, fixing that - see `ca_cert` in
 **Benchmark.** A 15-word nl→de run (10 everyday words + 5 deliberately obscure ones) against
 the live APIs, each provider queried independently:
 
+The 15 words, recorded here so the run is repeatable (the original set was not written down,
+so the `pons` column below comes from a re-run on this reconstructed list rather than from
+the same session as the older numbers): `huis water boek spreken werken afspraak invloed
+uitzoeken mooi liepen` and `onomkoopbaar beeldvorming wezel luidruchtig vergezocht`.
+
 - **dict** found 14/15 instantly. The one miss was an irregular inflection (`liepen`, past
   tense of `lopen`) that its suffix-stripping rules can't reach — those only cover regular
   patterns.
@@ -266,7 +296,19 @@ the live APIs, each provider queried independently:
   Realistically only useful as an occasional early-chain enrichment, not a bulk source.
 - **mymemory** answered all 15, but quality swings hard by word: clean single-word hits for
   straightforward vocabulary, unrelated corpus-matched sentence fragments for others (e.g. an
-  unrelated line about a "Präsidium" for `uitzoeken`).
+  unrelated line about a "Präsidium" for `uitzoeken`). It has since been removed as a
+  built-in provider — machine translation of a bare headword, with no sense structure to
+  hang a card on, was never worth a chain slot next to a real dictionary.
+- **pons** also found 14/15, missing the same `liepen` — it does not lemmatize either, and
+  `fm=1` fuzzy matching is *not* a fix: it ranks by string similarity, answering `liepen`
+  with `liegen`/`lieden`/`piepen`, none of which is the lemma. It produces the full
+  headword+alternatives+example shape on both faces, like `chatgpt` but from an edited
+  dictionary. On two words it was materially better than the local dict: `beeldvorming` →
+  `Imagebildung, Meinungsbildung` where dict gives the literal cognate `Bildung` (the exact
+  failure noted below), and `werken` → `arbeiten, funktionieren, wirken` where dict picks an
+  unrelated idiom sense (`bringen`, "eine unerwünschte Person hinausbefördern"). Its quirk
+  is packing several translations into one field — `spreken` → `sprechen, reden` arrives as
+  a single headword rather than a headword plus alternatives.
 - **chatgpt** is the only provider producing real flashcard structure (headword + curated
   alternatives + one example sentence that translates consistently between front and back),
   but it isn't infallible: it mistranslated `onomkoopbaar` ("incorruptible/can't be bribed")

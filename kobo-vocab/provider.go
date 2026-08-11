@@ -10,7 +10,7 @@ type Entry struct {
 	Front      string // optional override for the card front; "" = use the raw vocab word as-is. Set by providers that build a matching front+back card (ChatGPTProvider, LexicalaProvider, and DictProvider when dict_examples finds one); other providers leave this unset
 	Definition string // markdown, already formatted/truncated
 	Example    string // optional short example sentence; "" if none
-	Source     string // provenance label for logs/CSV, e.g. "dict", "dict-stem", "lexicala", "mymemory", "chatgpt"
+	Source     string // provenance label for logs/CSV, e.g. "dict", "dict-stem", "pons", "lexicala", "chatgpt"
 }
 
 // ErrNotFound means this provider has nothing for this word - the chain
@@ -21,9 +21,9 @@ type Entry struct {
 var ErrNotFound = errors.New("not found")
 
 // Provider is a single source of translations/definitions: the local dict
-// files, an online dictionary API (Lexicala), a translation API (MyMemory),
-// or (future) an LLM-based provider. All are looked up the same way, so
-// they can be freely reordered or combined via Chain.
+// files, an online dictionary API (PONS, Lexicala), or an LLM-based one.
+// All are looked up the same way, so they can be freely reordered or
+// combined via Chain.
 type Provider interface {
 	Name() string
 	Lookup(word, fromLang, toLang string) (Entry, error)
@@ -60,8 +60,8 @@ func (c Chain) Lookup(word, fromLang, toLang string) (Entry, error) {
 // device with no connectivity would retry every network provider on every
 // single word for the whole run, each paying its own timeout, instead of
 // noticing once that the network is unreachable. Meant to wrap
-// network-backed providers (Lexicala, MyMemory) at construction time, not
-// the local dict provider.
+// network-backed providers (PONS, Lexicala, ChatGPT) at construction time,
+// not the local dict provider.
 type CircuitBreaker struct {
 	inner     Provider
 	threshold int

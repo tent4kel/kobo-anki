@@ -13,6 +13,9 @@ font_menu=KF_Newsreader-Regular.ttf
 # font_front_bold=KF_Newsreader-Bold.ttf
 # font_front_italic=KF_Newsreader-Italic.ttf
 # font_back_bold=KF_Newsreader-Bold.ttf
+# font_back_italic=KF_Newsreader-Italic.ttf
+# font_menu_bold=KF_Newsreader-Bold.ttf
+# font_menu_italic=KF_Newsreader-Italic.ttf
 
 # Font sizes (in points for TrueType)
 size_title=24
