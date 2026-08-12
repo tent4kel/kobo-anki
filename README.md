@@ -200,7 +200,7 @@ draw path onto [go-text/typesetting](https://github.com/go-text/typesetting)
 Vocabulary extractor settings.
 
 ```ini
-dict_dir=dict               # path to dictionary zip files
+dict_dir=/mnt/onboard/.kobo/custom-dict   # where the dictionaries live
 db=/mnt/onboard/.kobo/KoboReader.sqlite
 out=words                   # output directory for generated CSVs
 auto_parse=false            # run kobo-vocab automatically in the background on startup
@@ -497,7 +497,19 @@ open with Numbers/LibreOffice, which honor the comma regardless of locale.
 
 ## Dictionaries
 
-kobo-vocab uses Kobo-format dictionaries (`dicthtml-*.zip`). These are the same format used by the Kobo reader itself. Place dictionary zips in the `dict/` directory (gitignored, not checked into the repo — bring your own).
+kobo-vocab uses Kobo-format dictionaries (`dicthtml-*.zip`) — the same format the reader
+itself uses. Put yours in `dict/` locally (gitignored, not checked into the repo — bring your
+own); `deploy-ftp.sh` uploads them to **`/mnt/onboard/.kobo/custom-dict/`** on the device,
+which is where `dict_dir` points.
+
+That location is deliberate. A dictionary in `custom-dict` is one Nickel lists, so it is the
+dictionary the Kobo uses when you long-press a word while reading — and therefore the one
+whose name it writes into `WordList.DictSuffix`. Pointing `dict_dir` at the same folder means
+every word you looked up is a word this tool can look up again. A private copy beside the app
+works too, but the two drift, and then a word Nickel found is one kobo-vocab misses.
+
+Dictionaries are the only thing `deploy-ftp.sh` writes outside the app folder. It overwrites
+same-named files and leaves everything else in `custom-dict` alone.
 
 The `dicthtml-nl-de.zip` used during development is a personal digitization of Van Dale's
 Dutch–German dictionary, not a freely redistributable one, which is why `dict/` stays

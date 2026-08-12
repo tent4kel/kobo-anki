@@ -19,10 +19,18 @@
 #   KOBO_FOLDER=kobo-anki-beta
 #
 # Never touches words/ (your live flashcard progress) or logs on-device -
-# only the files that ship in the tarball (bin/, dict/, APIs/, templates/,
+# only the files that ship in the tarball (bin/, APIs/, templates/,
 # start*.sh, *.conf, french.csv, cacert.pem) get uploaded/overwritten.
+#
+# Dictionaries are the one exception to "everything lands under the app
+# folder": dict/*.zip go to /mnt/onboard/.kobo/custom-dict, which is Nickel's
+# own, because that is what dict_dir points at. The whole point of putting
+# them there is that the dictionary the Kobo uses to look a word up is the
+# same file this tool later looks it up in. Anything already there under a
+# different name is left alone; same-named files are overwritten.
 set -e
 cd "$(dirname "$0")"
+REPO=$(pwd)
 
 if [ -f deploy.conf ]; then
     . ./deploy.conf
@@ -48,7 +56,7 @@ echo "Deploying to ftp://$KOBO_USER@$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER/kob
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
-mkdir -p "$STAGE/kobo-anki/bin" "$STAGE/kobo-anki/dict" "$STAGE/kobo-anki/templates"
+mkdir -p "$STAGE/kobo-anki/bin" "$STAGE/kobo-anki/templates"
 cp bin/kobo-anki-fbink bin/kobo-anki-server bin/kobo-vocab "$STAGE/kobo-anki/bin/"
 # fbink itself is only uploaded if you already have one built/placed in
 # bin/ locally - it needs an image-support-enabled build (see README), and
@@ -61,7 +69,6 @@ cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/kobo-anki/"
 # anki-mywords.conf.example), so this is deployed unconditionally.
 cp cacert.pem "$STAGE/kobo-anki/"
 cp templates/*.html "$STAGE/kobo-anki/templates/"
-[ -d dict ] && cp dict/*.zip "$STAGE/kobo-anki/dict/" 2>/dev/null || true
 [ -f french.csv ] && cp french.csv "$STAGE/kobo-anki/"
 # APIs/ (provider credentials, e.g. lexicala.json) - gitignored and only
 # deployed if you've actually populated it; providers=lexicala on-device
@@ -80,6 +87,24 @@ find kobo-anki -type f | while read -r f; do
         exit 1
     }
 done
+
+# Dictionaries, to Nickel's custom-dict rather than the app folder - see the
+# note at the top. Uploaded after the app so a half-finished deploy leaves the
+# dictionaries as they were rather than the binaries.
+cd "$REPO"
+if ls dict/*.zip >/dev/null 2>&1; then
+    echo ""
+    echo "Dictionaries -> /mnt/onboard/.kobo/custom-dict/"
+    for f in dict/*.zip; do
+        echo "  $(basename "$f")"
+        curl -sf --max-time 300 -T "$f" --ftp-create-dirs \
+            "ftp://$KOBO_HOST:$KOBO_PORT/.kobo/custom-dict/$(basename "$f")" \
+            --user "$KOBO_USER:" || {
+            echo "FAILED: $f" >&2
+            exit 1
+        }
+    done
+fi
 
 echo ""
 echo "Done. Restart the app on-device (or re-run its NickelMenu entry) to pick up the new build."

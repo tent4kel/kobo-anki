@@ -1,10 +1,15 @@
 # kobo-vocab configuration
-# Dictionary location - can be relative or absolute
-# Examples:
-#   dict_dir=dict                             (bundled with app)
-#   dict_dir=/mnt/onboard/.kobo/custom-dict   (Kobo custom dicts)
-#   dict_dir=/mnt/onboard/.kobo/dict          (Kobo built-in dicts)
-dict_dir=dict
+# Where the dictionaries live. The default is Nickel's own custom-dictionary
+# folder, and that is the point: a dictionary there is the one the Kobo uses
+# when you long-press a word while reading, so it is the one that recorded the
+# DictSuffix in your vocabulary list - which means every word you looked up is
+# one this tool can look up again. A private copy beside the app works too,
+# but the two drift, and then a word Nickel found is a word this misses.
+#   /mnt/onboard/.kobo/custom-dict   your own dictionaries, listed in Nickel
+#   /mnt/onboard/.kobo/dict          the built-in ones
+#   dict                             a private copy beside the app (relative
+#                                    paths resolve against this config file)
+dict_dir=/mnt/onboard/.kobo/custom-dict
 db=/mnt/onboard/.kobo/KoboReader.sqlite
 
 # Where generated decks go. Normally leave this alone: it follows data_dir
