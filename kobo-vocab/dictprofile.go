@@ -12,7 +12,7 @@ import (
 // binary - "does this dict nest its senses in <li>, or lay them out flat?",
 // "is bold a translation or a repeated headword?" - is stated here instead,
 // so a dictionary this project has never seen can be supported by writing a
-// [dict:xx-yy] section rather than by patching the parser.
+// [pair:xx-yy] section rather than by patching the parser.
 //
 // Selectors are the small CSS subset in selector.go and are evaluated
 // relative to the enclosing scope: entry within the shard, sense within the
@@ -86,8 +86,8 @@ var builtinProfiles = map[string]dictProfile{
 	},
 
 	// A dictionary that numbers its senses but marks nothing else: the
-	// sense list is the only structure there is, so translations come from
-	// translation_tag if one is set and from the whole gloss otherwise.
+	// sense list is the only structure there is, so a definition comes from
+	// the whole gloss unless the pair states a translation= selector.
 	"nested": {
 		name:  "nested",
 		sense: "ol > li",
@@ -145,7 +145,7 @@ func normalizeDictHTML(s string) string {
 // parsedSense is one meaning of a headword.
 type parsedSense struct {
 	translations []string
-	blocks       []string // cleaned text of each top-level block, for max_depth
+	blocks       []string // cleaned text of each top-level block; the first is the gloss
 	exSource     string
 	exTarget     string
 }
@@ -328,9 +328,9 @@ func nodeText(n *html.Node) string {
 	return strings.TrimSpace(wsRe.ReplaceAllString(b.String(), " "))
 }
 
-// topLevelBlockText is the text of each direct child element of a sense,
-// which is what max_depth counts: the first is the gloss, a second (if any)
-// the examples.
+// topLevelBlockText is the text of each direct child element of a sense: the
+// first is the gloss, a second (if any) the examples. Only the first is used,
+// unless the pair's profile says where to look with a translation= selector.
 //
 // These go through cleanText rather than nodeText because they are the
 // fallback shown when no translation selector matches, and there the whole

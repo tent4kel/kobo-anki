@@ -865,6 +865,29 @@ func TestExtractCardEntryWorksWithoutTranslationTag(t *testing.T) {
 	}
 }
 
+// withBoldFallback appends a bare-tag fallback to a profile's translation
+// chain, at the same depth as its own selector.
+//
+// The retired global translation_tag= setting used to build this inside
+// resolveDictProfile, for every dictionary at once. It is reproduced here
+// because the tests below pin *rendering* - what a card looks like given a
+// chain that reaches bold-only translations - which is still worth checking;
+// only the config mechanism that reached every dictionary indiscriminately
+// has gone. A [pair:] section states such a chain directly.
+func withBoldFallback(p dictProfile, tag string) []string {
+	if tag == "" || p.translationText != "" {
+		return p.translation
+	}
+	if len(p.translation) == 0 {
+		return []string{"> div:nth-of-type(1) " + tag, tag}
+	}
+	scope := ""
+	if f := strings.Fields(p.translation[0]); len(f) > 1 {
+		scope = strings.Join(f[:len(f)-1], " ") + " "
+	}
+	return append(append([]string{}, p.translation...), scope+tag)
+}
+
 // extractEntry adapts the pre-profile signature onto the profile pipeline,
 // so every behaviour these tests pin down - flat glosses, embedded
 // newlines, sense limits, bold-only translations, themed cards - is still
@@ -886,13 +909,7 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 	name := detectProfile(block)
 	p := builtinProfiles[name]
 	p.name = name
-	if tag != "" && p.translationText == "" {
-		if len(p.translation) > 0 {
-			p.translation = append(append([]string{}, p.translation...), scopeOf(p.translation[0])+tag)
-		} else {
-			p.translation = []string{"> div:nth-of-type(1) " + tag, tag}
-		}
-	}
+	p.translation = withBoldFallback(p, tag)
 
 	doc, err := html.Parse(strings.NewReader(normalizeDictHTML(block)))
 	if err != nil {
@@ -908,7 +925,7 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 		return "", "", "", false
 	}
 	definition, front = renderEntry(e, dictRender{
-		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
+		maxSenses: maxSenses, maxChars: maxChars,
 		asCard: wantExamples, cardFormat: cf,
 	}, p)
 	return e.word, definition, front, definition != ""
@@ -917,7 +934,8 @@ func extractEntry(block string, maxSenses, maxDepth, maxChars int, tagRe *regexp
 // parseKoboDict adapts the pre-profile loader signature onto parseDict,
 // detecting the profile from the dictionary itself.
 func parseKoboDict(path string, maxSenses, maxDepth, maxChars int, tag string, dictExamples bool, cf cardTemplate, dropLabels map[string]bool) (*KoboDict, error) {
-	p, _ := resolveDictProfile(Config{}, "", path, tag)
+	p, _ := resolveDictProfile(PairSettings{}, path)
+	p.translation = withBoldFallback(p, tag)
 	var strip []string
 	for k, v := range dropLabels {
 		if v {
@@ -926,7 +944,7 @@ func parseKoboDict(path string, maxSenses, maxDepth, maxChars int, tag string, d
 	}
 	sort.Strings(strip)
 	return parseDict(path, compileProfile(p, strip), dictRender{
-		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
+		maxSenses: maxSenses, maxChars: maxChars,
 		asCard: dictExamples, cardFormat: cf,
 	})
 }

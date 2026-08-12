@@ -39,6 +39,42 @@ func (w *ConfigWarnings) UnknownKey(line int, key string) {
 	log.Printf("%s:%d: unknown setting %q - ignored (typo, or does it belong in another conf file?)", w.Path, line, key)
 }
 
+// UnknownSection reports a section header this parser does not recognise.
+// hint names the forms that are accepted, since a section header is not
+// something a reader can guess at from the surrounding file the way a
+// misspelled key can be compared with its neighbours.
+func (w *ConfigWarnings) UnknownSection(line int, name, hint string) {
+	if w == nil {
+		return
+	}
+	w.Count++
+	log.Printf("%s:%d: unknown section [%s] - ignored, along with everything in it (expected %s)", w.Path, line, name, hint)
+}
+
+// WrongScope reports a setting that exists but not here, naming where it
+// belongs. Distinct from UnknownKey because the fix is different: nothing is
+// misspelled, the line is just in the wrong part of the file, and "unknown
+// setting" would send someone hunting for a typo that isn't there.
+func (w *ConfigWarnings) WrongScope(line int, key, belongs string) {
+	if w == nil {
+		return
+	}
+	w.Count++
+	log.Printf("%s:%d: %s= only means something %s - ignored here", w.Path, line, key, belongs)
+}
+
+// Removed reports a setting that used to exist and no longer does, naming
+// what to write instead. A retired setting is worse than an unknown one: the
+// config looks deliberate, so "unknown setting" reads as a typo rather than
+// as "this moved". instead is a short phrase, not a sentence.
+func (w *ConfigWarnings) Removed(line int, key, instead string) {
+	if w == nil {
+		return
+	}
+	w.Count++
+	log.Printf("%s:%d: %s= has been removed - %s", w.Path, line, key, instead)
+}
+
 // BadValue reports a value that could not be parsed as the type the setting
 // needs; want describes that type in plain words ("a whole number").
 func (w *ConfigWarnings) BadValue(line int, key, val, want string) {

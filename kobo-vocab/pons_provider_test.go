@@ -131,7 +131,6 @@ func TestPonsProviderErrorsAreNotSilent(t *testing.T) {
 		want   string
 	}{
 		{http.StatusForbidden, "not authorized"},
-		{http.StatusNotFound, "no dictionary"},
 		{http.StatusServiceUnavailable, "out of allowance"},
 		{http.StatusInternalServerError, "HTTP 500"},
 	} {
@@ -148,6 +147,36 @@ func TestPonsProviderErrorsAreNotSilent(t *testing.T) {
 		if !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("HTTP %d: err = %q, want it to mention %q", tc.status, err, tc.want)
 		}
+	}
+}
+
+// 404 means PONS publishes no dictionary for this pair. That is a permanent
+// fact about the pair, not a failure of the request, and treating it as one
+// was actively harmful: the circuit breaker wraps a provider instance shared
+// by every pair in the run, so three words of a pair PONS cannot serve used
+// to switch PONS off for a pair it can. It must read as not-found, and must
+// be remembered so it costs exactly one call ever.
+func TestPonsProviderRemembersAPairItHasNoDictionaryFor(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	p := newTestPonsProvider(t, server.URL)
+	for i := 0; i < 3; i++ {
+		if _, err := p.Lookup("house", "nl", "en"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("lookup %d: err = %v, want ErrNotFound so the breaker is not charged", i, err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("asked the API %d times, want 1 - the missing dictionary must be remembered", calls)
+	}
+
+	// A pair it does serve is unaffected by another pair's 404.
+	if _, err := p.Lookup("huis", "nl", "de"); errors.Is(err, ErrNotFound) && calls != 2 {
+		t.Errorf("a different pair was skipped too: calls = %d", calls)
 	}
 }
 

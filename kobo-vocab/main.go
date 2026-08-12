@@ -22,116 +22,148 @@ import (
 // --- Types ---
 
 type Config struct {
-	DictDir        string
-	DBPath         string
-	OutDir         string
-	MaxSenses      int      // max senses (<li> entries) to include per word; 0 = unlimited
-	MaxDepth       int      // max direct-child <div> blocks to keep per sense (drops examples etc.); 0 = unlimited
-	MaxChars       int      // max characters of definition text per word; 0 = unlimited
-	TranslationTag string   // if set (e.g. "b"), nested-format entries keep only this tag's spans, comma-joined; "" = keep full formatted text. No effect on flat-format entries - see extractEntry.
-	StripLabels    []string // annotation classes (gen/gram/reg/dom/geo) to remove from card text - see dict_strip_labels and CLASSES.md in the dict source
-	DictExamples   bool     // if true, nested-format entries try to build a ChatGPT/Lexicala-style card (bold headword + alternatives + one example, on both Front and Definition) from the dict's own example phrases. Verified against dicthtml-nl-de.zip only - see extractCardEntry. No effect without TranslationTag also set, and no effect on flat-format entries.
-	Providers      []string // content providers to try in order, e.g. []string{"dict", "lexicala"} - see provider.go
-	LexicalaConf   string   // path to Lexicala credentials JSON (base_url/token), only read if "lexicala" is in Providers
-	PonsConf       string   // path to PONS credentials JSON (base_url/token), only read if "pons" is in Providers
-	CACertPath     string   // path to a PEM CA bundle, appended to the system trust store for every network provider's TLS verification - see newHTTPClient. Needed on Kobo firmware that ships no CA bundle at all.
+	DictDir      string
+	DBPath       string
+	OutDir       string
+	StripLabels  []string // annotation classes (gen/gram/reg/dom/geo) to remove from card text - see dict_strip_labels and CLASSES.md in the dict source
+	LexicalaConf string   // path to Lexicala credentials JSON (base_url/token), only read if "lexicala" is in a pair's providers
+	PonsConf     string   // path to PONS credentials JSON (base_url/token), only read if "pons" is in a pair's providers
+	CACertPath   string   // path to a PEM CA bundle, appended to the system trust store for every network provider's TLS verification - see newHTTPClient. Needed on Kobo firmware that ships no CA bundle at all.
 
 	// CardFormat is the card_format template (see parseCardTemplate in
 	// cardtemplate.go) shared by dict (when DictExamples is on), lexicala,
-	// and chatgpt - global only, no per-[lang] override: lexicala/chatgpt
-	// are built once and cached across all language groups in a run (see
-	// providerCache in main()), so a per-language override would silently
-	// only apply to whichever group happened to build them first.
+	// and chatgpt - global only, no per-pair override: lexicala/chatgpt are
+	// built once and cached across every pair in a run (see providerCache in
+	// main()), so a per-pair override would silently only apply to whichever
+	// pair happened to build them first.
 	CardFormat string
 
 	// ChatGPT provider settings - all "variables to build the request" live
 	// here rather than in APIs/chatgpt.json, which holds only credentials
-	// (base_url/token), mirroring the Lexicala split. Only read if
-	// "chatgpt" is in Providers - see chatgpt_provider.go.
+	// (base_url/token), mirroring the Lexicala split. Global for the same
+	// reason as CardFormat: one instance is shared by every pair.
 	ChatGPTConf            string
 	ChatGPTModel           string
 	ChatGPTTemperature     float64
 	ChatGPTMaxTokens       int
 	ChatGPTMaxAlternatives int
 
+	// Defaults is the pair-scoped settings as they stand before any [pair:]
+	// section: the built-in defaults with the file's global keys folded on.
+	Defaults PairSettings
+
+	// Langs holds one entry per [lang:xx] section, keyed by source language.
+	// Stemming is the one thing that genuinely depends on the source
+	// language alone - nl reduces the same way whether the target is de or
+	// en - so it is all that lives here.
 	Langs map[string]*LangRules
 
-	// Dicts holds one entry per [dict:xx-yy] section, keyed by language pair
-	// ("nl-de"). A dictionary's structure is a property of the pair, not of
-	// the source language: nl-de and nl-en can come from entirely different
-	// generators, which a [nl] section has no way to express - it is why
-	// translation_tag had to carry "has no effect on flat dictionaries" as a
-	// caveat rather than simply not applying.
-	Dicts map[string]*DictSection
+	// Pairs holds one entry per [pair:xx-yy] section, keyed by language pair
+	// ("nl-de"). Everything about a dictionary belongs here rather than in
+	// Langs: nl-de and nl-en can come from different generators and want
+	// different providers, which a per-language section cannot express. It
+	// used to paper over that with caveats - "has no effect on flat
+	// dictionaries" - instead of simply not applying.
+	Pairs map[string]*PairOverride
 }
 
-// DictSection is a parsed [dict:xx-yy] section: a base profile by name, plus
-// any selectors given inline. Naming a base and overriding one selector is
-// allowed, which is usually all a slightly-off dictionary needs.
-type DictSection struct {
-	Base      string // "", "auto", or a name from builtinProfiles
-	Overrides dictProfile
-	HasFields bool
+// PairSettings is everything that depends on a language pair: the dictionary
+// named by that pair, and the cards built from it.
+type PairSettings struct {
+	MaxSenses    int      // senses to include per word; 0 = unlimited
+	MaxChars     int      // visible characters per card face; 0 = unlimited
+	DictExamples bool     // build a themed card (headword + alternatives + example) from the dict's own example phrases
+	Providers    []string // content providers to try in order - see provider.go
+
+	// Profile names the dictionary's structure: "" or "auto" to detect it
+	// from the markup, otherwise a name from builtinProfiles, or "custom" to
+	// start from nothing. Selectors are layered on top of whichever wins.
+	//
+	// Unlike the four above, these have no global default and cannot be set
+	// outside a [pair:] section: a selector describes one dictionary's
+	// markup, so there is nothing sensible for it to mean across all of them.
+	Profile      string
+	Selectors    dictProfile
+	HasSelectors bool
 }
 
+// PairOverride is one [pair:xx-yy] section - and also the global keys before
+// the first section, which are parsed into one of these and then folded onto
+// the built-in defaults. Every value field is a pointer so "not set here"
+// stays distinguishable from an explicit zero, false, or empty list.
+//
+// One override type serving both scopes is deliberate, and copied from
+// Style/StyleOverride in cmd/fbink: the keys valid in both places go through
+// exactly one switch (applyPairKey) instead of two parallel ones that have to
+// be kept in sync. Two such switches are how this config ended up with only
+// some of its settings overridable, and with no way to say for one dictionary
+// what could be said for all of them.
+type PairOverride struct {
+	MaxSenses    *int
+	MaxChars     *int
+	DictExamples *bool
+	Providers    *[]string
+
+	Profile      *string
+	Selectors    dictProfile
+	HasSelectors bool
+}
+
+// defaultPairSettings are the built-in defaults, before any config file.
+func defaultPairSettings() PairSettings {
+	return PairSettings{
+		MaxSenses: 1,
+		MaxChars:  150,
+		// The local dict is the one provider needing no credentials and no
+		// network, so it is what you get without saying anything.
+		Providers: []string{"dict"},
+	}
+}
+
+// applyPairOverride returns s with every field o actually sets replaced.
+func applyPairOverride(s PairSettings, o *PairOverride) PairSettings {
+	if o == nil {
+		return s
+	}
+	if o.MaxSenses != nil {
+		s.MaxSenses = *o.MaxSenses
+	}
+	if o.MaxChars != nil {
+		s.MaxChars = *o.MaxChars
+	}
+	if o.DictExamples != nil {
+		s.DictExamples = *o.DictExamples
+	}
+	if o.Providers != nil {
+		s.Providers = *o.Providers
+	}
+	if o.Profile != nil {
+		s.Profile = *o.Profile
+	}
+	if o.HasSelectors {
+		s.Selectors = o.Selectors
+		s.HasSelectors = true
+	}
+	return s
+}
+
+// effectivePair resolves the settings for one language pair: the global
+// defaults with that pair's [pair:] section folded on top.
+//
+// This replaces a pair of resolvers that looked the pair up by its *source
+// language*, handing nl-de and nl-en the same settings - including which
+// providers to call, which is why a pair PONS has no dictionary for could
+// take PONS away from a pair it does.
+func effectivePair(cfg Config, pair string) PairSettings {
+	return applyPairOverride(cfg.Defaults, cfg.Pairs[pair])
+}
+
+// LangRules is a [lang:xx] section: how a word in that language is reduced to
+// a form the dictionary might actually list.
 type LangRules struct {
 	Strips       []StripRule // suffix rules
 	ReduceDouble bool        // try removing doubled final consonant after strip
 	PrefixStrips []string    // prefixes to try removing
-
-	// Optional per-language overrides of the global max_senses/max_depth/
-	// max_chars/translation_tag/dict_examples defaults. Pointers so "not set
-	// in this [lang] section" (nil, inherit the global default) is
-	// distinguishable from an explicit zero/"unlimited" (or, for
-	// TranslationTag/DictExamples, explicitly turning it back off).
-	MaxSenses      *int
-	MaxDepth       *int
-	MaxChars       *int
-	TranslationTag *string
-	DictExamples   *bool
-	Providers      *[]string
-}
-
-// effectiveLimits resolves max_senses/max_depth/max_chars/translation_tag/
-// dict_examples for a language, preferring that language's [lang] section
-// override (if set) over the global default - e.g. a language with terser
-// dict glosses might want a higher max_chars than one whose entries are
-// typically more verbose.
-func effectiveLimits(cfg Config, rules *LangRules) (maxSenses, maxDepth, maxChars int, translationTag string, dictExamples bool) {
-	maxSenses, maxDepth, maxChars = cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars
-	translationTag = cfg.TranslationTag
-	dictExamples = cfg.DictExamples
-	if rules == nil {
-		return
-	}
-	if rules.MaxSenses != nil {
-		maxSenses = *rules.MaxSenses
-	}
-	if rules.MaxDepth != nil {
-		maxDepth = *rules.MaxDepth
-	}
-	if rules.MaxChars != nil {
-		maxChars = *rules.MaxChars
-	}
-	if rules.TranslationTag != nil {
-		translationTag = *rules.TranslationTag
-	}
-	if rules.DictExamples != nil {
-		dictExamples = *rules.DictExamples
-	}
-	return
-}
-
-// effectiveProviders resolves the ordered list of content providers to try
-// for a language, preferring that language's [lang] section override (if
-// set) over the global default - same override pattern as effectiveLimits,
-// kept separate since "which providers, in what order" is an orthogonal
-// concern from the dict-format formatting knobs above.
-func effectiveProviders(cfg Config, rules *LangRules) []string {
-	if rules != nil && rules.Providers != nil {
-		return *rules.Providers
-	}
-	return cfg.Providers
 }
 
 type StripRule struct {
@@ -168,9 +200,7 @@ func loadConfig(path string) Config {
 		DictDir:      "dict",
 		DBPath:       "KoboReader.sqlite",
 		OutDir:       ".",
-		MaxSenses:    1,
-		MaxDepth:     1,
-		MaxChars:     150,
+		Defaults:     defaultPairSettings(),
 		LexicalaConf: "APIs/lexicala.json",
 		PonsConf:     "APIs/pons.json",
 		CardFormat:   DefaultCardFormat,
@@ -189,7 +219,7 @@ func loadConfig(path string) Config {
 		ChatGPTMaxAlternatives: 3,
 
 		Langs: make(map[string]*LangRules),
-		Dicts: make(map[string]*DictSection),
+		Pairs: make(map[string]*PairOverride),
 	}
 
 	f, err := os.Open(path)
@@ -203,8 +233,16 @@ func loadConfig(path string) Config {
 	defer warn.Summary()
 
 	outWasSet := false
+	// Keys before the first section land in a PairOverride too, so the ones
+	// valid in both places are read by exactly one switch (applyPairKey)
+	// rather than by two that could drift apart.
+	var global PairOverride
 	var currentLang *LangRules
-	var currentDict *DictSection
+	var currentPair *PairOverride
+	// An unrecognised section header swallows its keys rather than letting
+	// them fall through to the global scope, where they would either be
+	// applied to every pair or reported as typos they are not.
+	skipping := false
 	scanner := bufio.NewScanner(f)
 	lineNo := 0
 	for scanner.Scan() {
@@ -214,16 +252,31 @@ func loadConfig(path string) Config {
 			continue
 		}
 
-		// Section header: [nl] for a language, [dict:nl-de] for a dictionary.
+		// Section header. Two forms, each naming the narrowest thing its
+		// settings depend on: [lang:nl] is how an nl word is reduced to a
+		// form worth looking up, [pair:nl-de] is the nl->de dictionary and
+		// the cards built from it. A repeated header reopens the same
+		// section rather than starting an empty one, which used to discard
+		// everything above it without a word.
 		if line[0] == '[' && line[len(line)-1] == ']' {
 			name := line[1 : len(line)-1]
-			currentLang, currentDict = nil, nil
-			if pair, ok := strings.CutPrefix(name, "dict:"); ok {
-				currentDict = &DictSection{}
-				cfg.Dicts[pair] = currentDict
-			} else {
-				currentLang = &LangRules{}
-				cfg.Langs[name] = currentLang
+			currentLang, currentPair, skipping = nil, nil, false
+			switch {
+			case strings.HasPrefix(name, "lang:"):
+				lang := strings.TrimPrefix(name, "lang:")
+				if currentLang = cfg.Langs[lang]; currentLang == nil {
+					currentLang = &LangRules{}
+					cfg.Langs[lang] = currentLang
+				}
+			case strings.HasPrefix(name, "pair:"):
+				pair := strings.TrimPrefix(name, "pair:")
+				if currentPair = cfg.Pairs[pair]; currentPair == nil {
+					currentPair = &PairOverride{}
+					cfg.Pairs[pair] = currentPair
+				}
+			default:
+				warn.UnknownSection(lineNo, name, "[lang:xx] or [pair:xx-yy]")
+				skipping = true
 			}
 			continue
 		}
@@ -235,67 +288,20 @@ func loadConfig(path string) Config {
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
 
-		if currentDict != nil {
-			// Inside a [dict:xx-yy] section. Every key here is a selector
-			// describing where this dictionary keeps something; see
-			// dictprofile.go for the shape and selector.go for the syntax.
-			p := &currentDict.Overrides
-			if key == "profile" {
-				if slices.Contains(profileNames(), val) {
-					currentDict.Base = val
-				} else {
-					warn.BadValue(lineNo, key, val, "one of "+strings.Join(profileNames(), ", "))
-				}
-				continue
-			}
-			// HasFields distinguishes "this section describes structure" from
-			// "this section only names a base profile". It accumulates over
-			// the keys that were understood: a typo further down warns but
-			// must not discard the valid selectors above it.
-			known := true
-			switch key {
-			case "sense":
-				p.sense = val
-			case "translation":
-				// A chain, written with "|" between alternatives: one
-				// generator can emit more than one entry shape.
-				for _, alt := range strings.Split(val, "|") {
-					if alt = strings.TrimSpace(alt); alt != "" {
-						p.translation = append(p.translation, alt)
-					}
-				}
-			case "translation_reject":
-				p.translationDrop = val
-			case "translation_text":
-				if val == "afterLastBR" {
-					p.translationText = val
-				} else {
-					warn.BadValue(lineNo, key, val, "afterLastBR")
-				}
-			case "example":
-				p.example = val
-			case "example_target":
-				p.exampleTarget = val
-			case "article":
-				p.article = val
-			case "entry":
-				p.entry = val
-			case "head":
-				p.headAttr = val
-			case "drop_tags":
-				p.dropTags = append(p.dropTags, splitProviders(val)...)
-			case "split_on":
-				p.splitOn = val
-			default:
-				known = false
-				warn.UnknownKey(lineNo, key)
-			}
-			currentDict.HasFields = currentDict.HasFields || known
+		if skipping {
+			// The header already said this section is ignored; repeating it
+			// per key would bury the one message that matters.
+			continue
+		}
+		if retiredKey(warn, lineNo, key) {
 			continue
 		}
 
-		if currentLang != nil {
-			// Inside a language section
+		switch {
+		case currentLang != nil:
+			// A [lang:xx] section: stemming, and nothing else. Anything that
+			// describes a dictionary belongs to a pair, since one source
+			// language can feed several dictionaries.
 			switch key {
 			case "strip":
 				sr := StripRule{}
@@ -312,33 +318,27 @@ func loadConfig(path string) Config {
 				}
 			case "prefix_strip":
 				currentLang.PrefixStrips = append(currentLang.PrefixStrips, val)
-			case "max_senses":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					currentLang.MaxSenses = &v
-				}
-			case "max_depth":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					currentLang.MaxDepth = &v
-				}
-			case "max_chars":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					currentLang.MaxChars = &v
-				}
-			case "translation_tag":
-				v := val
-				currentLang.TranslationTag = &v
-			case "dict_examples":
-				if v, ok := warn.Bool(lineNo, key, val); ok {
-					currentLang.DictExamples = &v
-				}
-			case "providers":
-				v := splitProviders(val)
-				currentLang.Providers = &v
 			default:
 				warn.UnknownKey(lineNo, key)
 			}
-		} else {
-			// Global settings
+
+		case currentPair != nil:
+			// A [pair:xx-yy] section: the shared keys, then the ones that
+			// only mean something for a single dictionary.
+			if applyPairKey(currentPair, key, val, lineNo, warn) {
+				continue
+			}
+			if applyProfileKey(currentPair, key, val, lineNo, warn) {
+				continue
+			}
+			warn.UnknownKey(lineNo, key)
+
+		default:
+			// Global: the shared keys set the defaults for every pair, and
+			// the rest are genuinely app-wide.
+			if applyPairKey(&global, key, val, lineNo, warn) {
+				continue
+			}
 			switch key {
 			case "dict_dir":
 				cfg.DictDir = val
@@ -354,30 +354,10 @@ func loadConfig(path string) Config {
 				// Retired along with the mymemory provider it used to switch
 				// on. Still accepted so an old config doesn't trip the
 				// unknown-key warning; it no longer does anything.
-			case "max_senses":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					cfg.MaxSenses = v
-				}
-			case "max_depth":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					cfg.MaxDepth = v
-				}
-			case "max_chars":
-				if v, ok := warn.Int(lineNo, key, val); ok {
-					cfg.MaxChars = v
-				}
-			case "translation_tag":
-				cfg.TranslationTag = val
-			case "dict_examples":
-				if v, ok := warn.Bool(lineNo, key, val); ok {
-					cfg.DictExamples = v
-				}
 			case "dict_strip_labels":
 				cfg.StripLabels = splitProviders(val)
 			case "card_format":
 				cfg.CardFormat = val
-			case "providers":
-				cfg.Providers = splitProviders(val)
 			case "lexicala_conf":
 				cfg.LexicalaConf = val
 			case "pons_conf":
@@ -401,16 +381,24 @@ func loadConfig(path string) Config {
 					cfg.ChatGPTMaxAlternatives = v
 				}
 			default:
+				// A selector outside a [pair:] section is the wrong-scope
+				// mistake worth naming: it looks like it should work, and it
+				// is not a typo, so "unknown setting" would send you hunting
+				// for one.
+				if profileKeyNames[key] {
+					warn.WrongScope(lineNo, key, "inside a [pair:xx-yy] section")
+					continue
+				}
+				if key == "strip" || key == "prefix_strip" || key == "reduce_double" {
+					warn.WrongScope(lineNo, key, "inside a [lang:xx] section")
+					continue
+				}
 				warn.UnknownKey(lineNo, key)
 			}
 		}
 	}
 
-	// providers= not set at all: local dict only, which is the one provider
-	// that needs no credentials and no network.
-	if cfg.Providers == nil {
-		cfg.Providers = []string{"dict"}
-	}
+	cfg.Defaults = applyPairOverride(cfg.Defaults, &global)
 
 	// Resolve relative paths against config file directory
 	absPath, _ := filepath.Abs(path)
@@ -457,6 +445,120 @@ func loadConfig(path string) Config {
 	}
 
 	return cfg
+}
+
+// applyPairKey sets one key=value on a PairOverride, reporting whether it
+// recognised the key. These are the settings that make sense both globally
+// (as a default for every pair) and inside a [pair:] section, so both scopes
+// call this and neither can grow a key the other lacks.
+func applyPairKey(o *PairOverride, key, val string, lineNo int, warn *core.ConfigWarnings) bool {
+	switch key {
+	case "max_senses":
+		if v, ok := warn.Int(lineNo, key, val); ok {
+			o.MaxSenses = &v
+		}
+	case "max_chars":
+		if v, ok := warn.Int(lineNo, key, val); ok {
+			o.MaxChars = &v
+		}
+	case "dict_examples":
+		if v, ok := warn.Bool(lineNo, key, val); ok {
+			o.DictExamples = &v
+		}
+	case "providers":
+		v := splitProviders(val)
+		o.Providers = &v
+	default:
+		return false
+	}
+	return true
+}
+
+// profileKeyNames is the set applyProfileKey handles, so the global scope can
+// tell "you wrote a selector in the wrong place" from "you made a typo".
+var profileKeyNames = map[string]bool{
+	"profile": true, "sense": true, "translation": true,
+	"translation_reject": true, "translation_text": true,
+	"example": true, "example_target": true, "article": true,
+	"entry": true, "head": true, "drop_tags": true, "split_on": true,
+}
+
+// applyProfileKey sets one key=value describing where a dictionary keeps the
+// parts of an entry - see dictprofile.go for the shape and selector.go for
+// the syntax. Pair-only: a selector describes one dictionary's markup, so
+// there is nothing for it to mean globally.
+func applyProfileKey(o *PairOverride, key, val string, lineNo int, warn *core.ConfigWarnings) bool {
+	if key == "profile" {
+		if slices.Contains(profileNames(), val) {
+			o.Profile = &val
+		} else {
+			warn.BadValue(lineNo, key, val, "one of "+strings.Join(profileNames(), ", "))
+		}
+		return true
+	}
+
+	p := &o.Selectors
+	// HasSelectors distinguishes "this section describes structure" from
+	// "this section only names a base profile". It accumulates over the keys
+	// that were understood: a typo further down warns but must not discard
+	// the valid selectors above it.
+	known := true
+	switch key {
+	case "sense":
+		p.sense = val
+	case "translation":
+		// A chain, written with "|" between alternatives: one generator can
+		// emit more than one entry shape.
+		for _, alt := range strings.Split(val, "|") {
+			if alt = strings.TrimSpace(alt); alt != "" {
+				p.translation = append(p.translation, alt)
+			}
+		}
+	case "translation_reject":
+		p.translationDrop = val
+	case "translation_text":
+		if val == "afterLastBR" {
+			p.translationText = val
+		} else {
+			warn.BadValue(lineNo, key, val, "afterLastBR")
+		}
+	case "example":
+		p.example = val
+	case "example_target":
+		p.exampleTarget = val
+	case "article":
+		p.article = val
+	case "entry":
+		p.entry = val
+	case "head":
+		p.headAttr = val
+	case "drop_tags":
+		p.dropTags = append(p.dropTags, splitProviders(val)...)
+	case "split_on":
+		p.splitOn = val
+	default:
+		known = false
+	}
+	o.HasSelectors = o.HasSelectors || known
+	return known
+}
+
+// retiredKey reports a setting that has been removed, naming what to write
+// instead. Both were ways of describing a dictionary from outside the profile
+// that describes it, which is why neither could say what it meant without a
+// paragraph of caveats about the dictionaries it silently did nothing to.
+func retiredKey(warn *core.ConfigWarnings, lineNo int, key string) bool {
+	switch key {
+	case "translation_tag":
+		warn.Removed(lineNo, key, `it was a translation selector, so write it as one: `+
+			`translation=<the profile's own chain> | <tag> in a [pair:xx-yy] section`)
+		return true
+	case "max_depth":
+		warn.Removed(lineNo, key, "the raw-block fallback now keeps the first block; "+
+			"to choose a different one, write a translation= selector for that [pair:xx-yy]")
+		return true
+	}
+	return false
 }
 
 // labelSet turns a dict_strip_labels list into a lookup set, ignoring any
@@ -601,8 +703,8 @@ func main() {
 		return
 	}
 
-	log.Printf("Config: dict_dir=%s db=%s providers=%v max_senses=%d max_depth=%d max_chars=%d langs=%v",
-		cfg.DictDir, cfg.DBPath, cfg.Providers, cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, langList(cfg.Langs))
+	log.Printf("Config: dict_dir=%s db=%s providers=%v max_senses=%d max_chars=%d langs=%v",
+		cfg.DictDir, cfg.DBPath, cfg.Defaults.Providers, cfg.Defaults.MaxSenses, cfg.Defaults.MaxChars, langList(cfg.Langs))
 
 	// Open Kobo database read-only
 	koboDB, err := sql.Open("sqlite", cfg.DBPath+"?mode=ro")
@@ -626,9 +728,9 @@ func main() {
 		return
 	}
 
-	// Dictionaries are loaded lazily, per language group, rather than all
-	// upfront: max_senses/max_depth/max_chars can be overridden per [lang]
-	// section, so each dict must be parsed with its own group's effective
+	// Dictionaries are loaded lazily, per pair, rather than all upfront: the
+	// card settings and the profile can both be overridden per [pair:]
+	// section, so each dict must be parsed with its own pair's effective
 	// settings rather than one global pass over every dicthtml-*.zip.
 	dictCache := make(map[string]*KoboDict)
 	// Providers other than "dict" are shared across all language groups in
@@ -647,25 +749,28 @@ func main() {
 		log.Printf("Processing %s → %s", g.fromLang, g.toLang)
 
 		rules := cfg.Langs[g.fromLang]
-		maxSenses, maxDepth, maxChars, translationTag, dictExamples := effectiveLimits(cfg, rules)
-		providerNames := effectiveProviders(cfg, rules)
+		// The pair, not its source language: nl-de and nl-en are different
+		// dictionaries and can want different settings and different
+		// providers.
+		pair := strings.TrimPrefix(suffix, "-")
+		set := effectivePair(cfg, pair)
 
 		var dict *KoboDict
-		if slices.Contains(providerNames, "dict") {
+		if slices.Contains(set.Providers, "dict") {
 			dict = dictCache[suffix]
 			if dict == nil {
 				path := filepath.Join(cfg.DictDir, "dicthtml"+suffix+".zip")
-				prof, origin := resolveDictProfile(cfg, strings.TrimPrefix(suffix, "-"), path, translationTag)
+				prof, origin := resolveDictProfile(set, path)
 				log.Printf("  dictionary profile: %s (%s)", prof.name, origin)
-				render := dictRender{maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars, asCard: dictExamples, cardFormat: cardFormat}
+				render := dictRender{maxSenses: set.MaxSenses, maxChars: set.MaxChars, asCard: set.DictExamples, cardFormat: cardFormat}
 				if parsed, err := parseDict(path, compileProfile(prof, cfg.StripLabels), render); err != nil {
 					log.Printf("No dictionary for suffix %s (dicthtml%s.zip): %v", suffix, suffix, err)
 				} else {
 					if len(parsed.Entries) == 0 {
 						log.Printf("WARNING: dicthtml%s.zip parsed with 0 entries - dictionary format may be unsupported", suffix)
 					} else {
-						log.Printf("Loaded dicthtml%s.zip: %d entries (max_senses=%d max_depth=%d max_chars=%d translation_tag=%q dict_examples=%v)",
-							suffix, len(parsed.Entries), maxSenses, maxDepth, maxChars, translationTag, dictExamples)
+						log.Printf("Loaded dicthtml%s.zip: %d entries (max_senses=%d max_chars=%d dict_examples=%v)",
+							suffix, len(parsed.Entries), set.MaxSenses, set.MaxChars, set.DictExamples)
 					}
 					dict = parsed
 					dictCache[suffix] = dict
@@ -673,7 +778,7 @@ func main() {
 			}
 		}
 
-		chain := buildChain(cfg, providerNames, NewDictProvider(dict, rules), providerCache)
+		chain := buildChain(cfg, set.Providers, NewDictProvider(dict, rules), providerCache)
 
 		var newTranslations []Translation
 		var newMisses []string
@@ -725,65 +830,70 @@ func main() {
 }
 
 // printEffectiveConfig dumps the settings actually in force - after
-// defaults, the config file, and each [lang] section's overrides have been
-// merged - so "did my edit take effect?" can be answered without deploying
-// and watching the log. Companion to the warnings emitted while parsing:
-// those say what was rejected, this says what won.
+// defaults, the config file, and each section's overrides have been merged -
+// so "did my edit take effect?" can be answered without deploying and
+// watching the log. Companion to the warnings emitted while parsing: those
+// say what was rejected, this says what won.
 func printEffectiveConfig(cfg Config) {
-	fmt.Printf("dict_dir     %s\n", cfg.DictDir)
-	fmt.Printf("db           %s\n", cfg.DBPath)
-	fmt.Printf("out          %s\n", cfg.OutDir)
-	fmt.Printf("ca_cert      %s\n", cfg.CACertPath)
-	fmt.Printf("card_format  %q\n", cfg.CardFormat)
-	fmt.Printf("strip_labels %v\n", cfg.StripLabels)
-	fmt.Printf("providers    %v\n", cfg.Providers)
-	fmt.Printf("chatgpt      model=%s temperature=%v max_tokens=%d max_alternatives=%d conf=%s\n",
+	fmt.Printf("dict_dir      %s\n", cfg.DictDir)
+	fmt.Printf("db            %s\n", cfg.DBPath)
+	fmt.Printf("out           %s\n", cfg.OutDir)
+	fmt.Printf("ca_cert       %s\n", cfg.CACertPath)
+	fmt.Printf("card_format   %q\n", cfg.CardFormat)
+	fmt.Printf("strip_labels  %v\n", cfg.StripLabels)
+	fmt.Printf("chatgpt       model=%s temperature=%v max_tokens=%d max_alternatives=%d conf=%s\n",
 		cfg.ChatGPTModel, cfg.ChatGPTTemperature, cfg.ChatGPTMaxTokens, cfg.ChatGPTMaxAlternatives, cfg.ChatGPTConf)
-	fmt.Printf("lexicala     conf=%s\n", cfg.LexicalaConf)
-	fmt.Printf("pons         conf=%s\n", cfg.PonsConf)
+	fmt.Printf("lexicala      conf=%s\n", cfg.LexicalaConf)
+	fmt.Printf("pons          conf=%s\n", cfg.PonsConf)
 
-	fmt.Printf("\n%-8s %-10s %-9s %-9s %-15s %-13s %s\n",
-		"lang", "max_senses", "max_depth", "max_chars", "translation_tag", "dict_examples", "providers")
-	fmt.Printf("%-8s %-10d %-9d %-9d %-15q %-13v %v\n",
-		"(global)", cfg.MaxSenses, cfg.MaxDepth, cfg.MaxChars, cfg.TranslationTag, cfg.DictExamples, cfg.Providers)
-	for _, lang := range langList(cfg.Langs) {
-		rules := cfg.Langs[lang]
-		senses, depth, chars, tag, examples := effectiveLimits(cfg, rules)
-		fmt.Printf("%-8s %-10d %-9d %-9d %-15q %-13v %v\n",
-			lang, senses, depth, chars, tag, examples, effectiveProviders(cfg, rules))
+	d := cfg.Defaults
+	fmt.Printf("\ndefaults for any pair: max_senses=%d max_chars=%d dict_examples=%v providers=%s\n",
+		d.MaxSenses, d.MaxChars, d.DictExamples, strings.Join(d.Providers, ","))
+
+	langs := langList(cfg.Langs)
+	if len(langs) > 0 {
+		fmt.Printf("\n%-8s %-8s %-9s %s\n", "lang", "strips", "prefixes", "reduce_double")
+		for _, lang := range langs {
+			r := cfg.Langs[lang]
+			fmt.Printf("%-8s %-8d %-9d %v\n", lang, len(r.Strips), len(r.PrefixStrips), r.ReduceDouble)
+		}
 	}
 
-	printDictProfiles(cfg)
+	printPairs(cfg)
 }
 
-// printDictProfiles lists the dictionary each pair would be parsed with. The
-// profile is usually detected rather than written down, so without this the
-// only way to learn which one is in force is to read the log of a real run -
-// or to notice the cards coming out wrong. Resolving means opening the zips,
-// which is why this is at the end.
-func printDictProfiles(cfg Config) {
+// printPairs lists what each language pair resolves to. This is per pair
+// rather than per source language because that is the granularity the
+// settings actually have: nl-de and nl-en are different dictionaries, and
+// the table could not previously show them differing even when they did.
+//
+// The profile is usually detected rather than written down, so without this
+// the only way to learn which one is in force is to read the log of a real
+// run - or to notice the cards coming out wrong. Resolving means opening the
+// zips, which is why this comes last.
+func printPairs(cfg Config) {
 	pairs := dictPairs(cfg)
 	if len(pairs) == 0 {
 		return
 	}
-	fmt.Printf("\n%-10s %-10s %-22s %s\n", "dict", "profile", "origin", "file")
+	fmt.Printf("\n%-8s %-9s %-22s %-10s %-9s %-13s %-24s %s\n",
+		"pair", "profile", "origin", "max_senses", "max_chars", "dict_examples", "providers", "file")
 	for _, pair := range pairs {
+		s := effectivePair(cfg, pair)
 		path := filepath.Join(cfg.DictDir, "dicthtml-"+pair+".zip")
-		if _, err := os.Stat(path); err != nil {
-			// Configured but not installed: say so rather than sniffing a
-			// missing file and reporting the fallback as if it were real.
-			fmt.Printf("%-10s %-10s %-22s %s\n", pair, "?", "not resolved", "missing: "+path)
-			continue
+		profName, origin, file := "?", "not resolved", "missing: "+path
+		if _, err := os.Stat(path); err == nil {
+			prof, o := resolveDictProfile(s, path)
+			profName, origin, file = prof.name, o, filepath.Base(path)
 		}
-		fromLang, _, _ := strings.Cut(pair, "-")
-		_, _, _, tag, _ := effectiveLimits(cfg, cfg.Langs[fromLang])
-		prof, origin := resolveDictProfile(cfg, pair, path, tag)
-		fmt.Printf("%-10s %-10s %-22s %s\n", pair, prof.name, origin, filepath.Base(path))
+		fmt.Printf("%-8s %-9s %-22s %-10d %-9d %-13v %-24s %s\n",
+			pair, profName, origin, s.MaxSenses, s.MaxChars, s.DictExamples,
+			strings.Join(s.Providers, ","), file)
 	}
 }
 
 // dictPairs is every language pair worth reporting on: the dictionaries
-// present in dict_dir, plus any pair with a [dict:] section, so a section
+// present in dict_dir, plus any pair with a [pair:] section, so a section
 // naming a pair with no dictionary installed still shows up (as a typo
 // usually would).
 func dictPairs(cfg Config) []string {
@@ -795,7 +905,7 @@ func dictPairs(cfg Config) []string {
 		seen[pair] = true
 		pairs = append(pairs, pair)
 	}
-	for pair := range cfg.Dicts {
+	for pair := range cfg.Pairs {
 		if !seen[pair] {
 			pairs = append(pairs, pair)
 		}
@@ -804,11 +914,13 @@ func dictPairs(cfg Config) []string {
 	return pairs
 }
 
+// langList is sorted, so two runs of -print-config can be diffed.
 func langList(m map[string]*LangRules) []string {
 	var out []string
 	for k := range m {
 		out = append(out, k)
 	}
+	slices.Sort(out)
 	return out
 }
 
@@ -980,22 +1092,20 @@ const brSentinel = "\x00BR\x00"
 // whether a dictionary is supported before deploying it to the Kobo. It
 // leads with the profile and where it came from, since that is the setting
 // that decides whether anything below it makes sense - and prints it in
-// [dict:] syntax, ready to paste into the config if it needs adjusting.
+// [pair:] syntax, ready to paste into the config if it needs adjusting.
 func testDictFile(cfg Config, path string) {
 	pair := ""
 	if base := filepath.Base(path); strings.HasPrefix(base, "dicthtml-") {
 		pair = strings.TrimSuffix(strings.TrimPrefix(base, "dicthtml-"), ".zip")
 	}
-	// Resolve through the [lang] section for the pair's source language, so
-	// this shows what a real run produces rather than what the global
-	// defaults alone would.
-	fromLang, _, _ := strings.Cut(pair, "-")
-	maxSenses, maxDepth, maxChars, translationTag, dictExamples := effectiveLimits(cfg, cfg.Langs[fromLang])
-	prof, origin := resolveDictProfile(cfg, pair, path, translationTag)
+	// Resolve through this pair's own [pair:] section, so it shows what a
+	// real run produces rather than what the global defaults alone would.
+	set := effectivePair(cfg, pair)
+	prof, origin := resolveDictProfile(set, path)
 
 	render := dictRender{
-		maxSenses: maxSenses, maxDepth: maxDepth, maxChars: maxChars,
-		asCard: dictExamples, cardFormat: compileCardFormatOrDefault(cfg.CardFormat),
+		maxSenses: set.MaxSenses, maxChars: set.MaxChars,
+		asCard: set.DictExamples, cardFormat: compileCardFormatOrDefault(cfg.CardFormat),
 	}
 	dict, err := parseDict(path, compileProfile(prof, cfg.StripLabels), render)
 	if err != nil {
@@ -1005,7 +1115,7 @@ func testDictFile(cfg Config, path string) {
 	fmt.Printf("%s: %d entries\n", path, len(dict.Entries))
 	fmt.Printf("profile: %s (%s)\n", prof.name, origin)
 	if pair != "" {
-		fmt.Printf("  [dict:%s]\n  profile=%s\n", pair, prof.name)
+		fmt.Printf("  [pair:%s]\n  profile=%s\n", pair, prof.name)
 		for _, line := range describeProfile(prof) {
 			fmt.Printf("  %s\n", line)
 		}

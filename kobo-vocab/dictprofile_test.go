@@ -169,23 +169,23 @@ func TestApplyProfileOverridesTranslationTextClearsSelectors(t *testing.T) {
 }
 
 func TestDescribeProfileRoundTripsThroughConfig(t *testing.T) {
-	// -test-dict prints a profile in [dict:] syntax so it can be pasted back
+	// -test-dict prints a profile in [pair:] syntax so it can be pasted back
 	// and adjusted. That is only true if reading it back yields the same
 	// profile.
 	want := builtinProfiles["wikdict"]
 
 	var b strings.Builder
-	b.WriteString("[dict:xx-yy]\nprofile=custom\n")
+	b.WriteString("[pair:xx-yy]\nprofile=custom\n")
 	for _, line := range describeProfile(want) {
 		b.WriteString(line + "\n")
 	}
 	cfg := loadTestConfig(t, b.String())
 
-	sec := cfg.Dicts["xx-yy"]
-	if sec == nil {
-		t.Fatal("no [dict:xx-yy] section parsed")
+	set := effectivePair(cfg, "xx-yy")
+	if !set.HasSelectors {
+		t.Fatal("no [pair:xx-yy] selectors parsed")
 	}
-	got := applyProfileOverrides(dictProfile{}, sec.Overrides)
+	got := applyProfileOverrides(dictProfile{}, set.Selectors)
 	got.name = want.name // the name is the section key, not a described field
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round trip lost fields:\n got %+v\nwant %+v", got, want)
@@ -203,7 +203,7 @@ func loadTestConfig(t *testing.T, body string) Config {
 
 func TestLoadConfigParsesDictSection(t *testing.T) {
 	cfg := loadTestConfig(t, strings.Join([]string{
-		"[dict:de-fr]",
+		"[pair:de-fr]",
 		"profile=custom",
 		"sense=ol > li",
 		"translation=b.tr | div > i",
@@ -215,14 +215,11 @@ func TestLoadConfigParsesDictSection(t *testing.T) {
 		"split_on=;",
 	}, "\n")+"\n")
 
-	sec := cfg.Dicts["de-fr"]
-	if sec == nil {
-		t.Fatal("no [dict:de-fr] section parsed")
+	set := effectivePair(cfg, "de-fr")
+	if set.Profile != "custom" || !set.HasSelectors {
+		t.Errorf("profile = %q hasSelectors = %v, want custom/true", set.Profile, set.HasSelectors)
 	}
-	if sec.Base != "custom" || !sec.HasFields {
-		t.Errorf("base = %q hasFields = %v, want custom/true", sec.Base, sec.HasFields)
-	}
-	o := sec.Overrides
+	o := set.Selectors
 	if o.sense != "ol > li" {
 		t.Errorf("sense = %q", o.sense)
 	}
@@ -242,15 +239,14 @@ func TestLoadConfigKeepsSelectorsDespiteATypoBelowThem(t *testing.T) {
 	var buf bytes.Buffer
 	old := log.Writer()
 	log.SetOutput(&buf)
-	cfg := loadTestConfig(t, "[dict:de-fr]\nprofile=custom\nsense=ol > li\nexampel=div.ex\n")
+	cfg := loadTestConfig(t, "[pair:de-fr]\nprofile=custom\nsense=ol > li\nexampel=div.ex\n")
 	log.SetOutput(old)
 
 	if !strings.Contains(buf.String(), "exampel") {
 		t.Errorf("the misspelled key was not reported:\n%s", buf.String())
 	}
-	sec := cfg.Dicts["de-fr"]
-	if sec == nil || !sec.HasFields || sec.Overrides.sense != "ol > li" {
-		t.Errorf("a typo discarded the valid selectors above it: %+v", sec)
+	if set := effectivePair(cfg, "de-fr"); !set.HasSelectors || set.Selectors.sense != "ol > li" {
+		t.Errorf("a typo discarded the valid selectors above it: %+v", set)
 	}
 }
 
@@ -258,7 +254,7 @@ func TestLoadConfigRejectsUnknownProfileName(t *testing.T) {
 	var buf bytes.Buffer
 	old := log.Writer()
 	log.SetOutput(&buf)
-	cfg := loadTestConfig(t, "[dict:de-fr]\nprofile=vandale2\n")
+	cfg := loadTestConfig(t, "[pair:de-fr]\nprofile=vandale2\n")
 	log.SetOutput(old)
 
 	if !strings.Contains(buf.String(), "vandale2") {
@@ -266,8 +262,8 @@ func TestLoadConfigRejectsUnknownProfileName(t *testing.T) {
 	}
 	// A typo must not silently become a custom profile with no selectors,
 	// which would parse the dictionary into nothing.
-	if sec := cfg.Dicts["de-fr"]; sec != nil && sec.HasFields {
-		t.Errorf("rejected profile still set fields: %+v", sec)
+	if set := effectivePair(cfg, "de-fr"); set.HasSelectors {
+		t.Errorf("rejected profile still set fields: %+v", set)
 	}
 }
 
@@ -296,7 +292,7 @@ func TestResolveDictProfileDetectsFromMarkup(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p, origin := resolveDictProfile(Config{}, "nl-de", writeProfileTestDict(t, c.body), "")
+			p, origin := resolveDictProfile(PairSettings{}, writeProfileTestDict(t, c.body))
 			if p.name != c.want || origin != "detected" {
 				t.Errorf("got %q (%s), want %q (detected)", p.name, origin, c.want)
 			}
@@ -306,9 +302,9 @@ func TestResolveDictProfileDetectsFromMarkup(t *testing.T) {
 
 func TestResolveDictProfileConfiguredBeatsDetected(t *testing.T) {
 	path := writeProfileTestDict(t, vandaleTestEntry)
-	cfg := loadTestConfig(t, "[dict:nl-de]\nprofile=flat\n")
+	cfg := loadTestConfig(t, "[pair:nl-de]\nprofile=flat\n")
 
-	p, origin := resolveDictProfile(cfg, "nl-de", path, "")
+	p, origin := resolveDictProfile(effectivePair(cfg, "nl-de"), path)
 	if p.name != "flat" || origin != "configured" {
 		t.Errorf("got %q (%s), want flat (configured) - the config must win over the sniffer", p.name, origin)
 	}
@@ -316,9 +312,9 @@ func TestResolveDictProfileConfiguredBeatsDetected(t *testing.T) {
 
 func TestResolveDictProfileLayersOverridesOnBase(t *testing.T) {
 	path := writeProfileTestDict(t, vandaleTestEntry)
-	cfg := loadTestConfig(t, "[dict:nl-de]\nprofile=vandale\nexample_target=span.foreign\n")
+	cfg := loadTestConfig(t, "[pair:nl-de]\nprofile=vandale\nexample_target=span.foreign\n")
 
-	p, origin := resolveDictProfile(cfg, "nl-de", path, "")
+	p, origin := resolveDictProfile(effectivePair(cfg, "nl-de"), path)
 	if origin != "configured + overrides" {
 		t.Errorf("origin = %q", origin)
 	}
@@ -332,9 +328,9 @@ func TestResolveDictProfileLayersOverridesOnBase(t *testing.T) {
 
 func TestResolveDictProfileAutoStillSniffs(t *testing.T) {
 	path := writeProfileTestDict(t, vandaleTestEntry)
-	cfg := loadTestConfig(t, "[dict:nl-de]\nprofile=auto\n")
+	cfg := loadTestConfig(t, "[pair:nl-de]\nprofile=auto\n")
 
-	if p, origin := resolveDictProfile(cfg, "nl-de", path, ""); p.name != "vandale" || origin != "detected" {
+	if p, origin := resolveDictProfile(effectivePair(cfg, "nl-de"), path); p.name != "vandale" || origin != "detected" {
 		t.Errorf("got %q (%s), want vandale (detected)", p.name, origin)
 	}
 }
@@ -344,9 +340,9 @@ func TestResolveDictProfileCustomStartsEmpty(t *testing.T) {
 	// dictionary's, or a deliberate description would be silently mixed with
 	// a guessed one.
 	path := writeProfileTestDict(t, vandaleTestEntry)
-	cfg := loadTestConfig(t, "[dict:nl-de]\nprofile=custom\ntranslation=b.tr\n")
+	cfg := loadTestConfig(t, "[pair:nl-de]\nprofile=custom\ntranslation=b.tr\n")
 
-	p, origin := resolveDictProfile(cfg, "nl-de", path, "")
+	p, origin := resolveDictProfile(effectivePair(cfg, "nl-de"), path)
 	if origin != "custom" {
 		t.Errorf("origin = %q, want custom", origin)
 	}
@@ -355,27 +351,43 @@ func TestResolveDictProfileCustomStartsEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveDictProfileAddsTranslationTagAsLastResort(t *testing.T) {
-	// translation_tag predates profiles. A dictionary that marks its
-	// translations must still prefer its own marker, with the bare tag only
-	// as a fallback.
+func TestPairSectionStatesTheFallbackChainItself(t *testing.T) {
+	// This is what the retired global translation_tag=b used to build: prefer
+	// the dictionary's own class marker, fall back to a bare tag at the same
+	// depth. Written out for the one pair it applies to, it is an ordinary
+	// chain - and it cannot silently reach a dictionary that needs no such
+	// fallback, which was the setting's whole problem.
 	path := writeProfileTestDict(t, vandaleTestEntry)
-	p, _ := resolveDictProfile(Config{}, "nl-de", path, "b")
+	cfg := loadTestConfig(t, "[pair:nl-de]\nprofile=vandale\n"+
+		"translation=> div:nth-of-type(1) b.tr | > div:nth-of-type(1) b\n")
 
+	p, _ := resolveDictProfile(effectivePair(cfg, "nl-de"), path)
 	want := []string{"> div:nth-of-type(1) b.tr", "> div:nth-of-type(1) b"}
 	if !reflect.DeepEqual(p.translation, want) {
 		t.Errorf("translation = %q, want %q", p.translation, want)
 	}
 }
 
-func TestResolveDictProfileIgnoresTranslationTagForPositionalDict(t *testing.T) {
-	// A flat dict bolds its repeated headword, so honouring translation_tag
-	// there would turn every definition into the word itself.
-	path := writeProfileTestDict(t, flatTestEntry)
-	p, _ := resolveDictProfile(Config{}, "nl-en", path, "b")
+func TestPairSectionsAreIndependent(t *testing.T) {
+	// The reason all of this moved: nl-de and nl-en share a source language
+	// but are different dictionaries. Settings written for one must not reach
+	// the other - which is exactly what a [lang:nl] section could not promise.
+	cfg := loadTestConfig(t, "providers=dict\n"+
+		"[pair:nl-de]\nproviders=dict,pons\nmax_chars=200\n"+
+		"[pair:nl-en]\nprofile=flat\n")
 
-	if len(p.translation) != 0 {
-		t.Errorf("translation = %q, want none for a positional profile", p.translation)
+	de, en := effectivePair(cfg, "nl-de"), effectivePair(cfg, "nl-en")
+	if !reflect.DeepEqual(de.Providers, []string{"dict", "pons"}) {
+		t.Errorf("nl-de providers = %v", de.Providers)
+	}
+	if !reflect.DeepEqual(en.Providers, []string{"dict"}) {
+		t.Errorf("nl-en providers = %v, want the global default untouched", en.Providers)
+	}
+	if de.MaxChars != 200 || en.MaxChars != 150 {
+		t.Errorf("max_chars: nl-de=%d nl-en=%d, want 200 and the 150 default", de.MaxChars, en.MaxChars)
+	}
+	if en.Profile != "flat" || de.Profile != "" {
+		t.Errorf("profile: nl-de=%q nl-en=%q", de.Profile, en.Profile)
 	}
 }
 
@@ -406,7 +418,7 @@ func TestBuiltinProfilesParseTheirOwnFamily(t *testing.T) {
 			p := builtinProfiles[c.profile]
 			dict, err := parseDict(writeProfileTestDict(t, c.body),
 				compileProfile(p, nil),
-				dictRender{maxSenses: 1, maxDepth: 1, maxChars: 150})
+				dictRender{maxSenses: 1, maxChars: 150})
 			if err != nil {
 				t.Fatalf("parseDict: %v", err)
 			}
@@ -426,7 +438,7 @@ func TestWikdictProfileRejectsInflectionTables(t *testing.T) {
 
 	dict, err := parseDict(writeProfileTestDict(t, body),
 		compileProfile(builtinProfiles["wikdict"], nil),
-		dictRender{maxSenses: 1, maxDepth: 1, maxChars: 150})
+		dictRender{maxSenses: 1, maxChars: 150})
 	if err != nil {
 		t.Fatalf("parseDict: %v", err)
 	}
@@ -442,7 +454,7 @@ func TestCardIsNotBuiltFromAPositionalProfile(t *testing.T) {
 	const body = `<w><a name="huis"/><b>huis</b><br/>house, home</w>`
 	dict, err := parseDict(writeProfileTestDict(t, body),
 		compileProfile(builtinProfiles["flat"], nil),
-		dictRender{maxSenses: 1, maxDepth: 1, maxChars: 150, asCard: true, cardFormat: defaultCardFormat()})
+		dictRender{maxSenses: 1, maxChars: 150, asCard: true, cardFormat: defaultCardFormat()})
 	if err != nil {
 		t.Fatalf("parseDict: %v", err)
 	}
@@ -461,7 +473,7 @@ func TestDictPairsUnionsInstalledAndConfigured(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
-	cfg := Config{DictDir: dir, Dicts: map[string]*DictSection{
+	cfg := Config{DictDir: dir, Pairs: map[string]*PairOverride{
 		"nl-de": {}, // already installed, must not be listed twice
 		"de-fr": {}, // configured but not installed
 	}}
@@ -469,5 +481,75 @@ func TestDictPairsUnionsInstalledAndConfigured(t *testing.T) {
 	want := []string{"de-fr", "nl-de", "nl-en"}
 	if got := dictPairs(cfg); !reflect.DeepEqual(got, want) {
 		t.Errorf("dictPairs = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfigNamesTheFixForEveryScopeMistake(t *testing.T) {
+	// A config that can't be edited without SSH has to say precisely what is
+	// wrong, once per mistake. Each of these used to be silent, or - for the
+	// retired keys - would keep working with a paragraph of caveats.
+	cases := []struct {
+		name, body, want string
+	}{
+		{"retired translation_tag", "translation_tag=b\n", "has been removed"},
+		{"retired max_depth", "max_depth=2\n", "has been removed"},
+		{"selector outside a pair", "sense=ol > li\n", "inside a [pair:xx-yy] section"},
+		{"stemming outside a lang", "strip=en\n", "inside a [lang:xx] section"},
+		{"old bare language section", "[nl]\nstrip=en\n", "unknown section [nl]"},
+		{"old dict section", "[dict:nl-de]\nprofile=flat\n", "unknown section [dict:nl-de]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			old := log.Writer()
+			log.SetOutput(&buf)
+			loadTestConfig(t, c.body)
+			log.SetOutput(old)
+
+			if !strings.Contains(buf.String(), c.want) {
+				t.Errorf("want a line mentioning %q, got:\n%s", c.want, buf.String())
+			}
+		})
+	}
+}
+
+func TestUnknownSectionSwallowsItsKeys(t *testing.T) {
+	// The warning says the section is ignored "along with everything in it",
+	// so it had better be: letting the keys fall through would apply a
+	// dictionary's settings to every pair in the file.
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	cfg := loadTestConfig(t, "max_chars=150\n[dict:nl-de]\nmax_chars=999\n")
+	log.SetOutput(old)
+
+	if got := effectivePair(cfg, "nl-de").MaxChars; got != 150 {
+		t.Errorf("max_chars = %d, want 150 - a key in an ignored section was applied anyway", got)
+	}
+	if n := strings.Count(buf.String(), "max_chars"); n != 0 {
+		t.Errorf("the swallowed key was reported %d times as well as its section:\n%s", n, buf.String())
+	}
+}
+
+func TestRepeatedSectionReopensItRatherThanReplacingIt(t *testing.T) {
+	// Allocating a fresh section per header silently discarded everything
+	// above it - a long strip list would lose most of itself to one stray
+	// repeat of its own header.
+	cfg := loadTestConfig(t, "[lang:nl]\nstrip=en\n[lang:de]\nstrip=e\n[lang:nl]\nstrip=s\n")
+
+	if got := len(cfg.Langs["nl"].Strips); got != 2 {
+		t.Errorf("nl has %d strip rules, want 2 - the repeated header dropped the first", got)
+	}
+}
+
+func TestGlobalKeysAreDefaultsForEveryPair(t *testing.T) {
+	// Global and [pair:] go through the same switch, so anything settable in
+	// one is settable in the other. This pins that they agree.
+	cfg := loadTestConfig(t, "max_senses=3\nmax_chars=80\ndict_examples=true\nproviders=dict,chatgpt\n")
+
+	s := effectivePair(cfg, "xx-yy")
+	if s.MaxSenses != 3 || s.MaxChars != 80 || !s.DictExamples ||
+		!reflect.DeepEqual(s.Providers, []string{"dict", "chatgpt"}) {
+		t.Errorf("global defaults did not reach an unmentioned pair: %+v", s)
 	}
 }

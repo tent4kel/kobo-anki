@@ -15,7 +15,6 @@ import (
 // only structure lives in the profile.
 type dictRender struct {
 	maxSenses  int
-	maxDepth   int
 	maxChars   int
 	asCard     bool // dict_examples
 	cardFormat cardTemplate
@@ -74,18 +73,16 @@ func sniffDict(zipPath string) (string, error) {
 
 // resolveDictProfile decides which profile describes one dictionary, and
 // says where the answer came from so -print-config and -test-dict can show
-// it. Order: an explicit [dict:xx-yy] section wins, otherwise the markup is
+// it. Order: an explicit [pair:xx-yy] section wins, otherwise the markup is
 // sniffed. Selectors given in the section are layered over the named base,
 // so overriding one of them does not mean restating the rest.
-func resolveDictProfile(cfg Config, pair, zipPath, translationTag string) (dictProfile, string) {
-	sec := cfg.Dicts[pair]
-
+func resolveDictProfile(s PairSettings, zipPath string) (dictProfile, string) {
 	base, origin := "", ""
-	if sec != nil && sec.Base != "" && sec.Base != "auto" {
-		base, origin = sec.Base, "configured"
+	if s.Profile != "" && s.Profile != "auto" {
+		base, origin = s.Profile, "configured"
 	}
 	if base == "" || base == "custom" {
-		if sec != nil && sec.HasFields && sec.Base == "custom" {
+		if s.HasSelectors && s.Profile == "custom" {
 			base, origin = "", "custom"
 		} else {
 			detected, err := sniffDict(zipPath)
@@ -103,40 +100,13 @@ func resolveDictProfile(cfg Config, pair, zipPath, translationTag string) (dictP
 		p.name = "custom"
 	}
 
-	if sec != nil && sec.HasFields {
-		p = applyProfileOverrides(p, sec.Overrides)
+	if s.HasSelectors {
+		p = applyProfileOverrides(p, s.Selectors)
 		if origin == "configured" {
 			origin = "configured + overrides"
 		}
 	}
-
-	// translation_tag predates profiles and says "the translation is
-	// whatever this tag wraps". It is kept as a last resort in the chain,
-	// scoped like the profile's own translation selector, so a dictionary
-	// that marks translations with a class is preferred and one that only
-	// bolds them still works. A custom profile states its own chain and
-	// does not need this.
-	if translationTag != "" && p.translationText == "" {
-		if len(p.translation) > 0 {
-			p.translation = append(p.translation, scopeOf(p.translation[0])+translationTag)
-		} else {
-			// No selector of its own: the tag is all there is to go on.
-			// Scoped to the sense's first block first (where the gloss
-			// lives), then anywhere in the sense.
-			p.translation = []string{"> div:nth-of-type(1) " + translationTag, translationTag}
-		}
-	}
 	return p, origin
-}
-
-// scopeOf returns everything but the final step of a selector, so a fallback
-// can be added at the same depth as the selector it backs up.
-func scopeOf(sel string) string {
-	fields := strings.Fields(sel)
-	if len(fields) <= 1 {
-		return ""
-	}
-	return strings.Join(fields[:len(fields)-1], " ") + " "
 }
 
 func applyProfileOverrides(p, o dictProfile) dictProfile {
@@ -177,7 +147,7 @@ func applyProfileOverrides(p, o dictProfile) dictProfile {
 	return p
 }
 
-// describeProfile renders a profile back into [dict:xx-yy] syntax. A
+// describeProfile renders a profile back into [pair:xx-yy] syntax. A
 // built-in is therefore also a worked example, and anyone generating their
 // own dictionary can read off the structure it has to produce.
 func describeProfile(p dictProfile) []string {
@@ -289,11 +259,14 @@ func renderEntry(e parsedEntry, r dictRender, p dictProfile) (definition, front 
 			text = strings.Join(s.translations, ", ")
 		}
 		if text == "" {
-			blocks := s.blocks
-			if r.maxDepth > 0 && len(blocks) > r.maxDepth {
-				blocks = blocks[:r.maxDepth]
+			// The first block is the gloss; a second, where there is one, is
+			// usually the example sentences, which belong on the card's own
+			// example line rather than run into its definition. A profile
+			// that wants something else says so with a translation=
+			// selector - that is what a profile is for.
+			if len(s.blocks) > 0 {
+				text = s.blocks[0]
 			}
-			text = strings.Join(blocks, " ")
 		}
 		if text != "" {
 			parts = append(parts, text)

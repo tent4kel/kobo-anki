@@ -19,30 +19,13 @@ db=/mnt/onboard/.kobo/KoboReader.sqlite
 # since it re-scans your Kobo's vocabulary list and dictionaries on boot.
 auto_parse=false
 
-# Definition length controls, for dictionaries with rich/nested entries
-# (multiple senses, example sentences, etc.). Which of these actually bite
-# depends on the dictionary's profile - see [dict:xx-yy] near the bottom:
-#   max_senses=1   how many senses to include per word. A "sense" is
-#                  whatever the profile's sense= selector matches ("ol > li"
-#                  for vandale/nested/wikdict; the flat profile has no
-#                  senses at all). Two or more senses render as a "- " list.
-#                  NOT used when a themed card is built - that is
-#                  dict_examples=true on any profile except flat - because a
-#                  card carries one example and that does not compose with a
-#                  multi-sense list, so the first sense wins outright.
-#   max_depth=1    how many direct sub-blocks to keep within each sense: the
-#                  first is the core gloss, a second is usually an
-#                  example-sentence block, so max_depth=1 drops examples.
-#                  Only consulted when the definition is built from those
-#                  blocks, i.e. on the flat profile or for a sense whose
-#                  translation= selectors matched nothing. Where they did
-#                  match, the definition comes from the translations instead
-#                  and this setting has no effect.
-#   max_chars=150  hard cap as a safety net, applied to the card front as
-#                  well as to the definition. Counts visible characters, so
-#                  the * and ** of Markdown emphasis don't eat into it.
+# Card length. Both are defaults for every pair and can be overridden in a
+# [pair:xx-yy] section below.
+#   max_senses=1   senses per word; two or more render as a "- " list. A
+#                  themed card (dict_examples) always uses the first only.
+#   max_chars=150  cap on each card face, in visible characters, so the * and
+#                  ** of Markdown emphasis don't eat into it.
 max_senses=1
-max_depth=1
 max_chars=150
 
 # Content providers to try, in order, for each word - the first one that
@@ -77,8 +60,9 @@ max_chars=150
 #              Needs credentials in APIs/chatgpt.json. Works with any
 #              OpenAI-compatible Chat Completions endpoint, not just
 #              OpenAI itself - see chatgpt_provider.go for details.
-# Can also be set per-language below, overriding this default. Uncomment
-# to try the online providers as a fallback once your dicts are set up:
+# Can also be set per pair below, which is the useful granularity: PONS has a
+# Dutch<->German dictionary but no Dutch<->English one, so nl-de and nl-en want
+# different lists. Uncomment to try the online providers once dicts are set up:
 # providers=dict,pons,lexicala,chatgpt
 providers=dict
 
@@ -161,7 +145,7 @@ card_format=[**{head}**][\n\n{alts}][\n\n*{ex}*]
 # noun rather than an annotation about it.
 dict_strip_labels=gen,gram
 
-# --- Dictionary structure -----------------------------------------------
+# --- Per-pair settings -----------------------------------------------
 #
 # Every dicthtml-*.zip has the same outer shape (the Kobo firmware fixes
 # that), but generators disagree about everything inside it: where the
@@ -173,7 +157,12 @@ dict_strip_labels=gen,gram
 # You normally need none of this: the profile is detected from the markup at
 # load time. `kobo-vocab -print-config` shows which one each dictionary
 # resolved to, and `-test-dict dict/dicthtml-nl-de.zip` prints the profile in
-# the syntax below, ready to paste and adjust.
+# the syntax below, ready to paste and adjust. Writing it out is still worth
+# doing once you are happy with a dictionary: an explicit profile= means
+# replacing the file cannot silently change the cards you already have.
+#
+# A [pair:] section also takes max_senses, max_chars, dict_examples and
+# providers, which is where they belong - all four describe one dictionary.
 #
 # Built-in profiles:
 #   vandale   this project's own build (see CLASSES.md next to the dict
@@ -193,10 +182,12 @@ dict_strip_labels=gen,gram
 # name. Naming a base profile and then overriding one selector is fine; the
 # rest of the base is kept.
 #
-# [dict:nl-de]
+# [pair:nl-de]
 # profile=vandale
+# dict_examples=true
+# providers=dict,pons,lexicala,chatgpt
 #
-# [dict:de-fr]
+# [pair:de-fr]
 # profile=custom
 # sense=ol > li                 # what to loop over; omit if entries are flat
 # translation=b.tr | div > i    # fallback chain, first match wins
@@ -225,44 +216,11 @@ dict_strip_labels=gen,gram
 # else within the sense. A selector that matches nothing yields no entries
 # rather than an error, so check with -test-dict after editing.
 
-[nl]
-# Any of max_senses/max_depth/max_chars can also be set per language,
-# overriding the global defaults above for words from this language only
-# (e.g. a language whose dict glosses run longer might want a higher
-# max_chars here). Uncomment to try:
-# max_senses=2
-# max_chars=200
-#
-# translation_tag=b: for dictionaries with rich nested entries (multiple
-# senses, grammar/gender annotations, usage notes - e.g. the nl-de dict),
-# keep only the text wrapped in <b> and drop everything else, rather than
-# showing the full formatted definition. Verified against dicthtml-nl-de.zip:
-# that dict consistently bolds the actual German translation and italicizes
-# the Dutch gloss/grammar notes, so this reduces clutter like "*(die*)"
-# gender tags down to just the translation word(s). Has no effect on
-# flat-format dicts (e.g. nl-en), where <b> wraps the repeated headword
-# instead - those are left as full text. Comment out to see full definitions
-# again.
-#
-# This is per-language, which is the wrong granularity: nl-de and nl-en are
-# both "nl" but need different answers. It is kept because it works, and is
-# used as the last fallback in a profile's translation chain - so a dict that
-# marks its translations properly is preferred and one that only bolds them
-# still works. A [dict:nl-de] section is the precise way to say the same
-# thing.
-translation_tag=b
-#
-# dict_examples=true: build a ChatGPT/Lexicala-style card (bold headword +
-# alternatives + one example, on both the front and back) straight from the
-# dict's own example phrases, instead of the plain translation list above.
-# Off by default. It needs the translations individually - one becomes the
-# headword, the rest alternatives - so it only applies to a dictionary whose
-# profile can tell them apart; a flat dict, which finds its gloss by
-# position, is left as a plain definition rather than having a card invented
-# from comma-splitting it. Words the dict doesn't illustrate with an example
-# (common for rarer vocabulary) still get a themed card, just without the
-# example. Check a few entries with `kobo-vocab -test-dict` first.
-# dict_examples=true
+# A [lang:xx] section is how a word in that language is reduced to a form the
+# dictionary might actually list - and nothing else. Stemming is the one thing
+# that depends on the source language alone: nl reduces the same way whether
+# the target is German or English.
+[lang:nl]
 reduce_double=true
 strip=en
 strip=s
@@ -284,7 +242,7 @@ prefix_strip=ge
 prefix_strip=in
 prefix_strip=uit
 
-[de]
+[lang:de]
 reduce_double=true
 strip=en
 strip=e
@@ -300,7 +258,7 @@ strip=ung
 strip=ung>en
 prefix_strip=ge
 
-[fr]
+[lang:fr]
 strip=s
 strip=e
 strip=es

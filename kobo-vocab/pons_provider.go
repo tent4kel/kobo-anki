@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -116,6 +117,11 @@ func (p *PonsProvider) Lookup(word, fromLang, toLang string) (Entry, error) {
 	if fromLang == "" || toLang == "" || strings.EqualFold(fromLang, toLang) {
 		return Entry{}, ErrNotFound
 	}
+	if p.cooldown.missing(ponsDictKey(fromLang, toLang)) {
+		// Already established there is no such dictionary. Not an error: the
+		// chain moves on exactly as for a word PONS does not have.
+		return Entry{}, ErrNotFound
+	}
 	today := p.now().Format("2006-01-02")
 	if p.cooldown.blocking(today) {
 		// Already told today that the allowance is gone. Skip silently -
@@ -158,7 +164,13 @@ func (p *PonsProvider) Lookup(word, fromLang, toLang string) (Entry, error) {
 		// common one for a vocabulary list full of inflected forms.
 		return Entry{}, ErrNotFound
 	case http.StatusNotFound:
-		return Entry{}, fmt.Errorf("pons: no dictionary %q (PONS has no such language pair)", params.Get("l"))
+		// A structural fact about the pair, not a failure of this request:
+		// remember it and answer like any other miss, so it neither costs
+		// another call nor counts against the circuit breaker that every
+		// other pair in this run shares.
+		p.cooldown.noDictionary(params.Get("l"))
+		log.Printf("  [pons] no dictionary %q - PONS has no such language pair, skipping it from now on", params.Get("l"))
+		return Entry{}, ErrNotFound
 	case http.StatusForbidden:
 		return Entry{}, fmt.Errorf("pons: not authorized - check the token in APIs/pons.json, or the account's access to dictionary %q", params.Get("l"))
 	case http.StatusServiceUnavailable:
@@ -391,13 +403,22 @@ func parsePonsFragment(fragment string) *html.Node {
 // another call. "Until tomorrow" is a calendar date change in local time,
 // which matches how a daily limit resets - though not necessarily in PONS's
 // timezone, so the first lookup after midnight may cost one more 503.
+// It also remembers the dictionaries PONS does not publish. That is a
+// permanent fact about the pair rather than a transient failure, and treating
+// it as a failure was actively harmful: a 404 counted toward CircuitBreaker's
+// threshold, and the breaker wraps a provider instance shared by every pair
+// in the run - so three nl-en words, for which there is no Dutch-English
+// dictionary at all, used to switch PONS off for nl-de as well. Remembered
+// here, the pair is skipped silently and costs exactly one 404 ever.
 type ponsCooldown struct {
-	path      string
-	exhausted string // date the API last reported the allowance gone
+	path        string
+	exhausted   string          // date the API last reported the allowance gone
+	unsupported map[string]bool // dictionary keys ("enl") the API has no dictionary for
 }
 
 type ponsCooldownState struct {
-	Exhausted string `json:"exhausted_on"`
+	Exhausted   string   `json:"exhausted_on"`
+	Unsupported []string `json:"unsupported,omitempty"`
 }
 
 // loadPonsCooldown reads the saved date, treating a missing, unreadable or
@@ -405,11 +426,14 @@ type ponsCooldownState struct {
 // this provider used to write. Failing open is right: losing a standdown
 // costs one 503, while failing closed would silently disable the provider.
 func loadPonsCooldown(path string) *ponsCooldown {
-	c := &ponsCooldown{path: path}
+	c := &ponsCooldown{path: path, unsupported: map[string]bool{}}
 	if data, err := os.ReadFile(path); err == nil {
 		var saved ponsCooldownState
 		if json.Unmarshal(data, &saved) == nil {
 			c.exhausted = saved.Exhausted
+			for _, d := range saved.Unsupported {
+				c.unsupported[d] = true
+			}
 		}
 	}
 	return c
@@ -421,7 +445,29 @@ func (c *ponsCooldown) blocking(today string) bool {
 
 func (c *ponsCooldown) trip(today string) {
 	c.exhausted = today
-	if data, err := json.Marshal(ponsCooldownState{Exhausted: today}); err == nil {
+	c.save()
+}
+
+// noDictionary records that PONS publishes no dictionary under this key, so
+// the pair is never asked about again.
+func (c *ponsCooldown) noDictionary(dict string) {
+	if c.unsupported == nil {
+		c.unsupported = map[string]bool{}
+	}
+	c.unsupported[dict] = true
+	c.save()
+}
+
+func (c *ponsCooldown) missing(dict string) bool { return c.unsupported[dict] }
+
+func (c *ponsCooldown) save() {
+	state := ponsCooldownState{Exhausted: c.exhausted}
+	for d := range c.unsupported {
+		state.Unsupported = append(state.Unsupported, d)
+	}
+	// Sorted so the file does not churn between runs on map order alone.
+	sort.Strings(state.Unsupported)
+	if data, err := json.Marshal(state); err == nil {
 		os.WriteFile(c.path, data, 0644)
 	}
 }

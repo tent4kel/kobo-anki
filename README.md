@@ -197,20 +197,36 @@ draw path onto [go-text/typesetting](https://github.com/go-text/typesetting)
 
 ### anki-mywords.conf
 
-Vocabulary extractor settings. See the example file for language-specific stemming rules.
+Vocabulary extractor settings.
 
 ```ini
 dict_dir=dict               # path to dictionary zip files
 db=/mnt/onboard/.kobo/KoboReader.sqlite
 out=words                   # output directory for generated CSVs
 auto_parse=false            # run kobo-vocab automatically in the background on startup
-max_senses=1                # how many senses (<li> entries) to include per word
-max_depth=1                 # direct sub-blocks to keep per sense (1 = gloss only, drops examples)
-max_chars=150               # hard cap on definition length, as a safety net
+max_senses=1                # senses to include per word
+max_chars=150               # cap on each card face, in visible characters
+
+[lang:nl]                   # how an nl word is reduced to a form worth looking up
+strip=en
+prefix_strip=ge
+
+[pair:nl-de]                # the nl->de dictionary, and the cards built from it
+profile=vandale
+dict_examples=true
+providers=dict,pons,lexicala,chatgpt
 ```
 
-`max_senses`/`max_depth`/`max_chars` can also be set inside a `[lang]` section (e.g. `[nl]`)
-to override the global defaults for words from that language only.
+**Sections are named for the narrowest thing their settings depend on.** A `[lang:xx]`
+section holds stemming and nothing else — Dutch reduces the same way whether the target is
+German or English. Everything about a dictionary lives in `[pair:xx-yy]`: its profile and
+selectors, plus `max_senses`, `max_chars`, `dict_examples` and `providers`, which are
+defaults globally and overridable per pair.
+
+That distinction is load-bearing rather than tidiness. `nl-de` and `nl-en` are different
+dictionaries from different generators, and PONS publishes a Dutch↔German dictionary but no
+Dutch↔English one — so they need different provider lists, which a per-language section had
+no way to express.
 
 When `auto_parse=true`, `start.sh` first does a fast, network-free check of how many new
 words are pending (`kobo-vocab -count-new`), then - only if there are any - launches the
@@ -221,9 +237,11 @@ entirely. When `false` (the default), you run `kobo-vocab` manually.
 
 kobo-vocab supports both the flat Kobo dict layout (stock/official dicts) and the nested
 `<ol>/<li>` layout produced by tools like [dictgen](https://github.com/pgaskin/dictutil)
-from richer sources (multiple senses, example sentences). `max_senses`/`max_depth`/`max_chars`
-trim entries from these richer dicts down to something readable on the e-ink screen — by
-default only the first sense's core gloss is kept, with example sentences dropped.
+from richer sources (multiple senses, example sentences). `max_senses`/`max_chars` trim
+entries from these richer dicts down to something readable on the e-ink screen — by default
+only the first sense is kept. Which part of a sense is used is the profile's business, not a
+setting's: a `translation=` selector says where the gloss is, and the raw-block fallback for
+a sense that matches none of them keeps the first block.
 
 Definitions are stored as **Markdown**, not plain text: `<b>`/`<i>` become `**bold**`/`*italic*`,
 multiple senses become a `- ` list, and `<br>` becomes a line break. `max_chars` counts visible
@@ -244,7 +262,7 @@ finds something wins. Built-in providers:
 | `chatgpt` | per-token (OpenAI or any compatible endpoint) | ~1.3s | LLM-generated card: headword + a few alternative meanings + one example sentence, consistent on both the front (source language) and back (target language); needs `APIs/chatgpt.json` |
 
 See `anki-mywords.conf.example` for the full set of `chatgpt_*`/`lexicala_conf`/`pons_conf`
-keys and how to set `providers=` globally or per `[lang]` section.
+keys and how to set `providers=` globally or per `[pair:xx-yy]` section.
 
 **PONS language pairs**, as of 2026-08-11 (`GET https://api.pons.com/v1/dictionaries`, no
 credentials needed — check it rather than trusting this list, it is a snapshot). 54
@@ -258,8 +276,11 @@ provider builds from a language pair — `nl`+`de` → `denl`.
   esit espl espt essl eszh frit frpl frsl frzh itpl itsl plru`
 
 Note what is absent: Dutch appears in exactly one dictionary, `denl`. There is
-**no Dutch↔English pair**, so a `nl-en` deck cannot use this provider at all — it will
-return `404` per word until the circuit breaker gives up for the run.
+**no Dutch↔English pair**, so a `nl-en` deck cannot use this provider at all. The first
+such word costs one `404`; the missing dictionary is then recorded in `pons.state.json`
+and that pair is skipped for good. It is deliberately *not* treated as a failure: the
+circuit breaker wraps one provider instance shared by every pair in the run, so counting a
+structural 404 against it used to switch PONS off for `nl-de` as well.
 
 `lexicala` keeps a daily call counter in a `*.state.json` beside its credentials, so repeated
 runs in a day share one budget rather than each assuming the whole allowance.
@@ -509,10 +530,13 @@ adjust; `-print-config` lists the profile in force for every dictionary in `dict
 pin or correct one, add a section keyed by language pair:
 
 ```ini
-[dict:de-fr]
+[pair:de-fr]
 profile=wikdict
 example=div.ex ul li     # keep the base profile, override one selector
 ```
+
+Writing the profile out is worth doing even when detection is right: an explicit `profile=`
+means replacing a dictionary file cannot silently change cards you already have.
 
 See `anki-mywords.conf.example` for the full key list and the selector syntax.
 
@@ -527,7 +551,7 @@ anki-mywords.conf:14: unknown setting "dict_example" - ignored (typo, or does it
 anki-mywords.conf:22: max_senses="abc" is not a whole number - keeping the default
 ```
 
-To see what's actually in force after defaults and `[lang]` overrides are merged — useful when
+To see what's actually in force after defaults and section overrides are merged — useful when
 a setting doesn't seem to be taking effect — run:
 
 ```sh
