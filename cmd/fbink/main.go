@@ -212,6 +212,11 @@ var (
 	currentCard *core.Card
 	decks       []string
 
+	// session is the running order for the deck currently open, and
+	// sessionCfg the learning-mode policy it was built from.
+	session    *core.Session
+	sessionCfg core.SessionConfig
+
 	deckPage     int
 	decksPerPage int
 
@@ -865,8 +870,13 @@ func readTouch() (TouchEvent, bool) {
 // Card helpers
 // ============================================================
 
-func randomDueCard() *core.Card {
-	return core.RandomDueCard(cards)
+// openDeck loads a deck and builds the running order for this sitting.
+func openDeck(name string) {
+	currentDeck = name
+	csvFile = core.DeckCSVPath(dataDir, name)
+	cards, _ = core.LoadCards(csvFile)
+	session = core.NewSession(cards, sessionCfg)
+	currentCard = session.Current(cards)
 }
 
 func displayFront() string {
@@ -933,7 +943,9 @@ func drawDecksScreen() {
 
 		path := core.DeckCSVPath(dataDir, d)
 		c, _ := core.LoadCards(path)
-		due := core.CountDueCards(c)
+		// What a sitting would open with, not what is technically past its
+		// due date - with a learning pool in force those differ.
+		due := core.CountStudyable(c, sessionCfg)
 
 		// Deck name on the left, due count in gray on the right
 		nameRect := Rect{r.X + screenW/20, r.Y, r.W / 2, r.H}
@@ -1095,12 +1107,9 @@ func drawDoneScreen() {
 // ============================================================
 
 func rateAndAdvance(rating fsrs.Rating) Screen {
-	card := core.FindCard(cards, currentCard.Key())
-	if card != nil {
-		core.Review(card, rating)
-		core.SaveCards(csvFile, cards)
-	}
-	currentCard = randomDueCard()
+	session.Rate(cards, rating)
+	core.SaveCards(csvFile, cards)
+	currentCard = session.Current(cards)
 	if currentCard == nil {
 		drawDoneScreen()
 		return ScreenDone
@@ -1116,6 +1125,7 @@ func main() {
 	coreCfg := core.LoadCoreConfig("anki-core.conf")
 	dataDir = coreCfg.DataDir
 	reverseMode = coreCfg.Reverse
+	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 
 	loadConfig()
@@ -1175,10 +1185,7 @@ func main() {
 			case strings.HasPrefix(id, "deck-"):
 				idx, _ := strconv.Atoi(strings.TrimPrefix(id, "deck-"))
 				if idx >= 0 && idx < len(decks) {
-					currentDeck = decks[idx]
-					csvFile = core.DeckCSVPath(dataDir, currentDeck)
-					cards, _ = core.LoadCards(csvFile)
-					currentCard = randomDueCard()
+					openDeck(decks[idx])
 					if currentCard == nil {
 						screen = ScreenDone
 						drawDoneScreen()

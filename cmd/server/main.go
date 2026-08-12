@@ -22,6 +22,13 @@ var (
 	tmpl    *template.Template
 	csvFile string
 	dataDir = "."
+
+	// The running order for the deck currently being studied. This server is
+	// a single-user local thing - one browser, one deck at a time - so one
+	// session, guarded by cardsMu like everything else, is enough.
+	session     *core.Session
+	sessionDeck string
+	sessionCfg  core.SessionConfig
 )
 
 type studyData struct {
@@ -81,7 +88,9 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		deckInfos = append(deckInfos, DeckInfo{Name: d, Due: core.CountDueCards(c)})
+		// What a sitting would open with, not what is technically past its
+		// due date - with a learning pool in force those differ.
+		deckInfos = append(deckInfos, DeckInfo{Name: d, Due: core.CountStudyable(c, sessionCfg)})
 	}
 	cardsMu.Unlock()
 
@@ -101,15 +110,22 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	csvFile = core.DeckCSVPath(dataDir, deck)
 	var err error
 	cards, err = core.LoadCards(csvFile)
+	if err == nil && sessionDeck != deck {
+		// Only on a deck change. rateHandler redirects back here after every
+		// rating, so rebuilding unconditionally would throw the running order
+		// away between every pair of cards - re-queued cards included.
+		session, sessionDeck = core.NewSession(cards, sessionCfg), deck
+	}
+	card := session.Current(cards)
+	if card == nil {
+		// Let the next visit start a fresh sitting.
+		sessionDeck = ""
+	}
 	cardsMu.Unlock()
 	if err != nil {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
-	cardsMu.RLock()
-	card := core.RandomDueCard(cards)
-	cardsMu.RUnlock()
 	if card == nil {
 		tmpl.ExecuteTemplate(w, "done", deck)
 		return
@@ -154,15 +170,21 @@ func rateHandler(w http.ResponseWriter, r *http.Request) {
 	q, _ := strconv.Atoi(r.URL.Query().Get("q"))
 	reverse := r.URL.Query().Get("reverse")
 
+	rating := fsrs.Rating(q)
+	if rating < fsrs.Again || rating > fsrs.Easy {
+		rating = fsrs.Good
+	}
+
 	cardsMu.Lock()
 	csvFile = core.DeckCSVPath(dataDir, deck)
 	cards, _ = core.LoadCards(csvFile)
-	card := core.FindCard(cards, front)
-	if card != nil {
-		rating := fsrs.Rating(q)
-		if rating < fsrs.Again || rating > fsrs.Easy {
-			rating = fsrs.Good
-		}
+	if cur := session.Current(cards); sessionDeck == deck && cur != nil && cur.Key() == front {
+		session.Rate(cards, rating)
+		core.SaveCards(csvFile, cards)
+	} else if card := core.FindCard(cards, front); card != nil {
+		// A stale URL or the back button: rate the card the browser actually
+		// asked about, but leave the running order alone rather than advancing
+		// it past a card that was never shown.
 		core.Review(card, rating)
 		core.SaveCards(csvFile, cards)
 	}
@@ -185,21 +207,27 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	cardsMu.Unlock()
 
 	cardsMu.RLock()
+	// Both numbers, because with a learning pool in force they differ and
+	// the difference is the interesting part: "due" is what FSRS says, the
+	// other is what a sitting would actually offer.
 	due := core.CountDueCards(cards)
+	studyable := core.CountStudyable(cards, sessionCfg)
 	total := len(cards)
 	cardsMu.RUnlock()
 
 	data := struct {
-		Deck  string
-		Total int
-		Due   int
-	}{deck, total, due}
+		Deck      string
+		Total     int
+		Due       int
+		Studyable int
+	}{deck, total, due, studyable}
 	tmpl.ExecuteTemplate(w, "stats", data)
 }
 
 func main() {
 	coreCfg := core.LoadCoreConfig("anki-core.conf")
 	dataDir = coreCfg.DataDir
+	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 
 	if len(os.Args) > 1 {

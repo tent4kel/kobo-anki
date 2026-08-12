@@ -1,6 +1,45 @@
 # Shared core configuration (used by both fbink and server binaries)
 data_dir=words
 reverse=false
+
+# FSRS tuning.
+# request_retention: the probability of recall you are scheduling for. Higher
+#   means shorter intervals and more reviews.
+# maximum_interval: the longest gap FSRS may schedule, in days.
 request_retention=0.9
 maximum_interval=36500
-enable_short_term=false
+
+# Learning steps. With this on, a new word is answered twice in one sitting
+# before it gets a real interval (Good -> ten minutes -> Good -> a few days),
+# and a lapsed word gets one extra look before going back on schedule. Those
+# repeats are handed over immediately by the review queue, so the minutes
+# never cost any actual waiting - see step_gap below.
+#
+# Turning it off gives one look per card per day. Repeats within a day then
+# earn nothing: FSRS derives recall stability from how long you went without
+# seeing the card, and over zero elapsed days that gain is exactly zero - so
+# a Good right after an Again gives back none of what the Again took away.
+enable_short_term=true
+
+# Learning mode: hold new words back until the ones already in flight have
+# stuck, instead of offering a freshly generated deck all at once.
+#
+# learning_pool is how many cards may be part-learned at the same time. New
+# words are introduced only to fill the free slots. It is a rolling window,
+# not a daily target: the moment a card matures out of the pool the next word
+# takes its slot, in the same sitting. 0 turns the gate off and offers every
+# due card, which is how this worked before the setting existed.
+#
+# mature_interval is the scheduled interval, in days, at which a card counts
+# as learned and gives its slot back. Note that rating a new word Easy puts
+# it past this in one tap, freeing its own slot and pulling the next word in. With request_retention=0.9 an interval
+# in days is roughly the stability in days, so a word runs about
+# 3d -> 4d -> 11d -> 25d: at 7 a slot frees on the third successful review.
+# Raise it (21 is Anki's "mature" line) to make new words trickle in slower.
+#
+# step_gap is how many other cards are shown before one you rated Again - or
+# one still mid-learning-step - comes back. It is a target, not a promise:
+# with fewer cards than that left, it goes to the end of the sitting instead.
+learning_pool=10
+mature_interval=7
+step_gap=3

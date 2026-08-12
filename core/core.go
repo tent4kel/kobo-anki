@@ -3,7 +3,6 @@ package core
 import (
 	"bufio"
 	"io"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +18,20 @@ type CoreConfig struct {
 	RequestRetention float64
 	MaximumInterval  float64
 	EnableShortTerm  bool
+
+	// Learning mode - see SessionConfig, whose fields these are.
+	LearningPool   int
+	MatureInterval int
+	StepGap        int
+}
+
+// Session returns the learning-mode policy these settings describe.
+func (c CoreConfig) Session() SessionConfig {
+	return SessionConfig{
+		LearningPool:   c.LearningPool,
+		MatureInterval: c.MatureInterval,
+		StepGap:        c.StepGap,
+	}
 }
 
 func LoadCoreConfig(path string) CoreConfig {
@@ -26,7 +39,10 @@ func LoadCoreConfig(path string) CoreConfig {
 		DataDir:          "words",
 		RequestRetention: 0.9,
 		MaximumInterval:  36500,
-		EnableShortTerm:  false,
+		EnableShortTerm:  true,
+		LearningPool:     10,
+		MatureInterval:   7,
+		StepGap:          3,
 	}
 
 	f, err := os.Open(path)
@@ -69,6 +85,18 @@ func LoadCoreConfig(path string) CoreConfig {
 		case "enable_short_term":
 			if v, ok := warn.Bool(lineNo, key, val); ok {
 				cfg.EnableShortTerm = v
+			}
+		case "learning_pool":
+			if v, ok := warn.Int(lineNo, key, val); ok {
+				cfg.LearningPool = v
+			}
+		case "mature_interval":
+			if v, ok := warn.Int(lineNo, key, val); ok {
+				cfg.MatureInterval = v
+			}
+		case "step_gap":
+			if v, ok := warn.Int(lineNo, key, val); ok {
+				cfg.StepGap = v
 			}
 		default:
 			warn.UnknownKey(lineNo, key)
@@ -273,21 +301,6 @@ func CountDueCards(cards []Card) int {
 		}
 	}
 	return n
-}
-
-// RandomDueCard returns a pointer to a random due card in the slice,
-// or nil if no cards are due. The caller decides the fallback behavior.
-func RandomDueCard(cards []Card) *Card {
-	var due []int
-	for i, c := range cards {
-		if IsDue(c) {
-			due = append(due, i)
-		}
-	}
-	if len(due) > 0 {
-		return &cards[due[rand.Intn(len(due))]]
-	}
-	return nil
 }
 
 func parseTime(s string) time.Time {

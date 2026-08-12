@@ -106,8 +106,13 @@ data_dir=words              # directory containing flashcard CSVs
 reverse=false               # swap front/back
 request_retention=0.9       # FSRS target retention (0.0-1.0)
 maximum_interval=36500      # max days between reviews
-enable_short_term=false     # false = schedule days out, true = minutes
+enable_short_term=true      # learning steps (see Scheduling)
+learning_pool=10            # max cards part-learned at once; 0 = no gate
+mature_interval=7           # scheduled days at which a card counts learned
+step_gap=3                  # cards shown before an "Again" card comes back
 ```
+
+See [Scheduling](#scheduling) for what the last four do.
 
 ### anki-fbink.conf
 
@@ -324,6 +329,80 @@ one. That structural difference reliably tells "this is an example for the sense
 apart from "this is actually the next sense", so `dict` can build the same headword +
 alternatives + example card shape as `lexicala`/`chatgpt`, for free and instantly, for any
 word the dictionary happens to illustrate.
+
+## Scheduling
+
+FSRS owns the long-term schedule — the due date, measured in days. It does not
+own what you see next while you are actually sitting there, and the two used to
+be conflated: the queue was "every card whose due date has passed", redrawn at
+random on every advance. Three things went wrong as a result.
+
+**Rating "Again" did not bring the card back.** Every FSRS interval is clamped
+to a minimum of one day, Again included, so the card you had just failed was
+the one card guaranteed not to reappear.
+
+**A never-seen card has no due date at all**, which reads as "due since the
+zero time" — a freshly generated 500-word deck offered all 500 at once, with
+nothing tracking how many were already half-learned.
+
+**Drawing at random with replacement** meant one card could come up twice in a
+row while another due card was never shown.
+
+A *session* now decides the running order once, when you open a deck, and then
+walks it. Every due card is shown exactly once, and a card that is still
+mid-step goes back into the same sitting, `step_gap` cards further on, rather
+than disappearing until its due date. Keep rating a card Again and it keeps
+coming back — the sitting ends when you stop failing it.
+
+### Learning mode
+
+`learning_pool` caps how many cards may be *in flight* — seen at least once,
+not yet learned — at the same time. New words are introduced only to fill the
+free slots, so a 500-word deck starts as a manageable handful and grows as the
+first words stick. The pool is counted over the whole deck, not just today's
+due cards: a word you are three days into learning still holds its slot on the
+days it is not due, otherwise the pool would refill every morning.
+
+It is a rolling window, not a target for the day or for the sitting. The moment
+a card matures out of the pool, the next word takes its slot — in the same
+sitting, a few cards later, not tomorrow. So a sitting that clears ten reviews
+picks up ten new words as it goes, interleaved with the reviews rather than
+queued up behind them. Each maturing card frees exactly one slot and so lets in
+exactly one word, which keeps a sitting proportional to the work done in it.
+
+One consequence worth knowing: rating a *new* word Easy schedules it straight
+past `mature_interval`, so it frees its own slot on the spot and pulls the next
+word in. That is the intended answer to "I already know this one" — it is how
+you get through vocabulary you only need to confirm — but it does mean an Easy
+tap always costs you a new word.
+
+`mature_interval` is where a card stops counting as in flight — the scheduled
+interval, in days, at which FSRS is treating it as known. With
+`request_retention=0.9` an interval in days is roughly the stability in days,
+so a word runs about 3d → 4d → 11d → 25d, and the default of 7 frees a slot on
+about the third successful review. Raising it to 21 (Anki's "mature" line)
+makes new words trickle in considerably more slowly. Set `learning_pool=0` to
+turn the gate off entirely and offer every due card, as before.
+
+The deck list shows what a sitting would actually open with, not the raw count
+of cards past their due date — with a pool in force those are very different
+numbers. It is a floor rather than a total, since a sitting picks up new words
+as it matures old ones out of the pool.
+
+### Learning steps
+
+`enable_short_term=true` puts FSRS in its learning-steps mode: a new word is
+answered twice in one sitting before it gets a real interval (Good → ten
+minutes → Good → a few days), and a lapsed word gets one extra look before
+going back on schedule. The session queue hands those repeats over
+immediately, so the "ten minutes" never costs any actual waiting — you just
+answer the card twice.
+
+It is worth leaving on. With it off you get one look per card per day, and a
+repeat within the same day earns nothing at all: FSRS derives recall stability
+from how long you went without seeing the card, and over zero elapsed days
+that term is exactly zero — so a Good right after an Again gives back none of
+what the Again took away.
 
 ## Flashcard CSV format
 
