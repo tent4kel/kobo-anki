@@ -1,8 +1,10 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -312,16 +314,52 @@ func TestCardsInFlightHoldTheirSlotWhileNotDue(t *testing.T) {
 	}
 }
 
-func TestAFullPoolAdmitsNoNewCards(t *testing.T) {
+// A full pool holds new words back - but only while there is other work. It
+// paces how fast new words arrive; it does not get to end the sitting.
+func TestAFullPoolHoldsNewWordsBackWhileThereIsOtherWork(t *testing.T) {
 	cards := deck(func(add func(Card)) {
 		for i := range 5 {
-			add(futureCard("a"+string(rune('0'+i)), 1))
+			add(futureCard("a"+string(rune('0'+i)), 1)) // in flight, pool full
 		}
+		add(seenCard("review", 1)) // ...and something due to get on with
 		add(newCard("neu"))
 	})
 
-	if q := NewSession(cards, SessionConfig{LearningPool: 5, MatureInterval: 7}).queue; len(q) != 0 {
-		t.Errorf("admitted %v with a full pool, want nothing", q)
+	q := NewSession(cards, SessionConfig{LearningPool: 5, MatureInterval: 7}).queue
+	if !slices.Equal(q, []string{"review"}) {
+		t.Errorf("sitting is %v, want just the due review - the pool is full", q)
+	}
+}
+
+// The case that made the deck list lie: nothing due, the pool over its cap
+// from cards learned before it existed, and 37 words waiting. The old rule
+// opened an empty sitting and showed "Done!" while the deck list advertised
+// the work. Now one sitting's worth comes in regardless of the cap.
+func TestAnEmptySittingTakesNewWordsAnyway(t *testing.T) {
+	cards := deck(func(add func(Card)) {
+		for i := range 13 { // over a cap of 10, as the live deck was
+			add(futureCard(fmt.Sprintf("old%02d", i), 1))
+		}
+		for i := range 37 {
+			add(newCard(fmt.Sprintf("neu%02d", i)))
+		}
+	})
+	cfg := SessionConfig{LearningPool: 10, MatureInterval: 7, StepGap: 3}
+
+	s := NewSession(cards, cfg)
+	if got := s.Remaining(); got != 10 {
+		t.Fatalf("sitting opened with %d cards, want a pool's worth (10)", got)
+	}
+	// Bounded to one batch: those ten are in flight the moment they are
+	// introduced, so the rolling top-up must not keep pulling more in.
+	useScheduler(t, true)
+	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
+	introduced := map[string]bool{}
+	for _, k := range order {
+		introduced[k] = true
+	}
+	if len(introduced) != 10 {
+		t.Errorf("worked through %d words, want the 10 admitted and no more", len(introduced))
 	}
 }
 
@@ -384,6 +422,52 @@ func TestEveryDueCardIsShownExactlyOnce(t *testing.T) {
 		if got := count(order, id); got != 1 {
 			t.Errorf("%q shown %d time(s), want exactly 1: %v", id, got, order)
 		}
+	}
+}
+
+// A deck where everything is scheduled a few days out offers nothing at all -
+// the case study-ahead exists for. Order is the point here: soonest first, so
+// the cards closest to falling due are the ones you pull forward.
+func TestStudyAheadOffersFutureCardsSoonestFirst(t *testing.T) {
+	useScheduler(t, false)
+
+	cards := deck(func(add func(Card)) {
+		for _, days := range []int{30, 2, 6, 1} {
+			c := seenCard(fmt.Sprintf("in%dd", days), 10)
+			c.Due = time.Now().AddDate(0, 0, days)
+			add(c)
+		}
+	})
+	cfg := SessionConfig{LearningPool: 10, MatureInterval: 7, StepGap: 3}
+
+	// Nothing is due, so an ordinary sitting is empty.
+	if got := NewSession(cards, cfg).Remaining(); got != 0 {
+		t.Fatalf("ordinary sitting offered %d cards, want none - nothing is due", got)
+	}
+	if got := CountStudyAhead(cards); got != 4 {
+		t.Errorf("CountStudyAhead = %d, want 4", got)
+	}
+
+	s := NewStudyAheadSession(cards, cfg)
+	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
+
+	want := []string{"in1d", "in2d", "in6d", "in30d"}
+	if !slices.Equal(order, want) {
+		t.Errorf("presented %v, want %v (soonest first)", order, want)
+	}
+}
+
+// Study-ahead is only for cards that are not due. A card that IS due belongs
+// to the ordinary sitting and must not be offered twice.
+func TestStudyAheadSkipsCardsThatAreAlreadyDue(t *testing.T) {
+	cards := deck(func(add func(Card)) {
+		add(seenCard("due", 10))
+		add(futureCard("later", 10))
+	})
+
+	s := NewStudyAheadSession(cards, SessionConfig{LearningPool: 10, MatureInterval: 7})
+	if got := s.queue; !slices.Equal(got, []string{"later"}) {
+		t.Errorf("study-ahead queue is %v, want just the card that is not due", got)
 	}
 }
 

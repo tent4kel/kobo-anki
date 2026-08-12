@@ -15,7 +15,11 @@ a { text-decoration:none; color:#000; }
 <br><br>
 <font size="4">No cards due for review.</font>
 <br><br><br>
-<a href="/stats?deck={{.}}"><font size="4">[view stats]</font></a>
+{{if .Ahead}}
+<a href="/study?deck={{.Deck}}&amp;ahead=1"><font size="4">[study ahead ({{.Ahead}})]</font></a>
+<br><br>
+{{end}}
+<a href="/stats?deck={{.Deck}}"><font size="4">[view stats]</font></a>
 <br><br>
 <a href="/"><font size="4">[back to decks]</font></a>
 </td>

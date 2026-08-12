@@ -88,9 +88,10 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		// What a sitting would open with, not what is technically past its
-		// due date - with a learning pool in force those differ.
-		deckInfos = append(deckInfos, DeckInfo{Name: d, Due: core.CountStudyable(c, sessionCfg)})
+		// The real backlog, deliberately - not what a sitting would open
+		// with. The learning pool decides how cards arrive; it does not get
+		// to rewrite the number that says where the deck actually stands.
+		deckInfos = append(deckInfos, DeckInfo{Name: d, Due: core.CountDueCards(c)})
 	}
 	cardsMu.Unlock()
 
@@ -110,16 +111,31 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	csvFile = core.DeckCSVPath(dataDir, deck)
 	var err error
 	cards, err = core.LoadCards(csvFile)
-	if err == nil && sessionDeck != deck {
-		// Only on a deck change. rateHandler redirects back here after every
-		// rating, so rebuilding unconditionally would throw the running order
-		// away between every pair of cards - re-queued cards included.
-		session, sessionDeck = core.NewSession(cards, sessionCfg), deck
+	// ahead is only ever set by the link on the done page. Once the sitting
+	// exists it carries on under sessionDeck like any other, so nothing else -
+	// the rating links, the reverse toggle - has to thread the flag through.
+	ahead := r.URL.Query().Get("ahead") == "1"
+	if err == nil && (ahead || sessionDeck != deck) {
+		// Otherwise only on a deck change: rateHandler redirects back here
+		// after every rating, so rebuilding unconditionally would throw the
+		// running order away between every pair of cards - re-queued ones too.
+		if ahead {
+			session = core.NewStudyAheadSession(cards, sessionCfg)
+		} else {
+			session = core.NewSession(cards, sessionCfg)
+		}
+		sessionDeck = deck
 	}
 	card := session.Current(cards)
+	aheadCount := 0
 	if card == nil {
 		// Let the next visit start a fresh sitting.
 		sessionDeck = ""
+		// "Nothing due" is the scheduler's verdict on right now, and the
+		// learning pool is part of the scheduler - so this page reads the same
+		// whether the deck is empty or the pool is holding new words back. The
+		// deck list is where the real backlog lives.
+		aheadCount = core.CountStudyAhead(cards)
 	}
 	cardsMu.Unlock()
 	if err != nil {
@@ -127,7 +143,10 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if card == nil {
-		tmpl.ExecuteTemplate(w, "done", deck)
+		tmpl.ExecuteTemplate(w, "done", struct {
+			Deck  string
+			Ahead int
+		}{deck, aheadCount})
 		return
 	}
 

@@ -943,9 +943,10 @@ func drawDecksScreen() {
 
 		path := core.DeckCSVPath(dataDir, d)
 		c, _ := core.LoadCards(path)
-		// What a sitting would open with, not what is technically past its
-		// due date - with a learning pool in force those differ.
-		due := core.CountStudyable(c, sessionCfg)
+		// The real backlog, deliberately - not what a sitting would open
+		// with. The learning pool decides how cards arrive; it does not get
+		// to rewrite the number that says where the deck actually stands.
+		due := core.CountDueCards(c)
 
 		// Deck name on the left, due count in gray on the right
 		nameRect := Rect{r.X + screenW/20, r.Y, r.W / 2, r.H}
@@ -1091,12 +1092,30 @@ func drawDoneScreen() {
 	topHalf := Rect{contentRect.X, contentRect.Y, contentRect.W, contentRect.H / 2}
 	drawLabel(topHalf, "Done!", FontMenu, activeStyle.SizeCard, "")
 
+	// "Nothing due" is the scheduler's verdict on right now, and the learning
+	// pool is part of the scheduler - so this screen says the same thing
+	// whether the deck is empty or the pool is holding new words back. The
+	// deck list is where the real backlog lives; this is not the place to
+	// explain a mechanism nobody should have to think about.
 	botHalf := Rect{contentRect.X, contentRect.Y + contentRect.H/2, contentRect.W, contentRect.H / 2}
 	drawLabel(botHalf, fmt.Sprintf("No more cards due in %s", currentDeck), FontMenu, activeStyle.SizeMenu, "")
 
 	// Any touch goes back to decks
 	sceneAdd("any", contentRect)
 	sceneAdd("any", actionRect)
+
+	// Studying ahead is offered rather than entered automatically, because
+	// reviewing early costs the card the spacing that made it stick. Added
+	// after the "any" regions so sceneHitTest, which takes the last match,
+	// prefers the button.
+	if n := core.CountStudyAhead(cards); n > 0 {
+		// The bottom row of the same 2x2 action grid the rating buttons use
+		// (drawBackScreen), so it lands where Again/Easy do rather than a row
+		// higher. Built with the shared helpers so it stays aligned if the
+		// action zone ever moves.
+		rows := splitV(inset(actionRect, gap/2), 2, gap)
+		drawButton("ahead", rows[1], fmt.Sprintf("Study ahead (%d)", n), FontMenu, activeStyle.SizeMenu/2)
+	}
 
 	flushScreen()
 	drainTouch()
@@ -1221,7 +1240,15 @@ func main() {
 			}
 
 		case ScreenDone:
-			if id != "" {
+			switch {
+			case id == "ahead":
+				session = core.NewStudyAheadSession(cards, sessionCfg)
+				currentCard = session.Current(cards)
+				if currentCard != nil {
+					screen = ScreenFront
+					drawFrontScreen()
+				}
+			case id != "":
 				screen = ScreenDecks
 				drawDecksScreen()
 			}

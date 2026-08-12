@@ -370,6 +370,15 @@ picks up ten new words as it goes, interleaved with the reviews rather than
 queued up behind them. Each maturing card frees exactly one slot and so lets in
 exactly one word, which keeps a sitting proportional to the work done in it.
 
+The pool paces how fast new words arrive; it never ends a sitting. If nothing
+else is studiable — the pool sitting over its cap because those cards were
+learned before it existed, or simply every review being a few days out — one
+sitting's worth of new words comes in regardless of the cap. Without that, a
+deck can show a backlog on the deck list and then refuse to hand any of it
+over, which is a bug however you label it. It stays bounded: those words are in
+flight from the moment they are introduced, so nothing further is admitted for
+the rest of the sitting.
+
 One consequence worth knowing: rating a *new* word Easy schedules it straight
 past `mature_interval`, so it frees its own slot on the spot and pulls the next
 word in. That is the intended answer to "I already know this one" — it is how
@@ -384,10 +393,30 @@ about the third successful review. Raising it to 21 (Anki's "mature" line)
 makes new words trickle in considerably more slowly. Set `learning_pool=0` to
 turn the gate off entirely and offer every due card, as before.
 
-The deck list shows what a sitting would actually open with, not the raw count
-of cards past their due date — with a pool in force those are very different
-numbers. It is a floor rather than a total, since a sitting picks up new words
-as it matures old ones out of the pool.
+The deck list keeps showing the real backlog — every card past its due date —
+not the pool-limited number a sitting opens with. The pool decides how cards
+arrive; it does not get to rewrite the number that says where the deck actually
+stands. The stats page shows both, so the difference is visible where it's
+useful rather than baked into the headline figure.
+
+### Studying ahead
+
+A deck can easily have nothing due for days — everything scheduled six days out
+means six "Done!" screens in a row. When that happens the done screen offers to
+study ahead: the cards that are *not* due yet, **soonest first**, so the ones
+closest to falling due are the ones you pull forward. There is no limit; you
+stop when you like.
+
+It is offered rather than entered automatically. Reviewing a card early costs
+it exactly the spacing that was making it stick, so the app tells you nothing
+is due first and lets you decide. This is the one place the running order is
+sorted instead of shuffled — with study-ahead the order *is* the point.
+
+"Nothing due" is the scheduler's verdict on right now, and the learning pool is
+part of the scheduler — so the done screen reads the same whether the deck is
+empty or the pool is holding new words back. It is not the place to explain a
+mechanism you should not have to think about; the deck list is where the real
+backlog lives.
 
 ### Learning steps
 

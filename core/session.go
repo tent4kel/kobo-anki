@@ -108,7 +108,63 @@ func NewSession(cards []Card, cfg SessionConfig) *Session {
 	shuffle(s.queue)
 	shuffle(s.held)
 	s.topUp(cards)
+
+	// The pool paces how fast new words arrive; it does not get to leave you
+	// with nothing to do while words are waiting. A sitting can otherwise open
+	// empty for days at a time - the pool sitting over its cap because those
+	// cards were learned before it existed, or simply every review being a few
+	// days out - and the deck list would be advertising work the app then
+	// refuses to hand over.
+	//
+	// So when nothing else is studiable, one sitting's worth comes in
+	// regardless of the cap. That is bounded: those words are in flight the
+	// moment they are introduced, so inPool is over the cap for the rest of
+	// the sitting and topUp admits nothing more.
+	if len(s.queue) == 0 {
+		for len(s.held) > 0 && len(s.queue) < s.cfg.LearningPool {
+			s.admit()
+		}
+	}
 	return s
+}
+
+// NewStudyAheadSession builds a sitting out of the cards that are NOT due yet,
+// soonest first.
+//
+// This is the answer to a deck where everything is scheduled a few days out:
+// the alternative is a "Done!" screen for six days running. It is deliberately
+// something you opt into after being told nothing is due, rather than
+// somewhere the app slides you automatically - reviewing early costs you the
+// spacing that made the card stick, so it should be a decision.
+//
+// Sorted rather than shuffled, because with study-ahead the order is the whole
+// point: the cards closest to falling due are the ones worth pulling forward,
+// and you stop whenever you like. The learning pool is not consulted - every
+// card here has been seen before, so there is nothing to introduce.
+func NewStudyAheadSession(cards []Card, cfg SessionConfig) *Session {
+	s := &Session{cfg: cfg, pending: map[string]bool{}}
+	ahead := make([]Card, 0, len(cards))
+	for _, c := range cards {
+		if !IsDue(c) {
+			ahead = append(ahead, c)
+		}
+	}
+	slices.SortStableFunc(ahead, func(a, b Card) int { return a.Due.Compare(b.Due) })
+	for _, c := range ahead {
+		s.queue = append(s.queue, c.Key())
+	}
+	return s
+}
+
+// CountStudyAhead is how many cards a study-ahead sitting would offer.
+func CountStudyAhead(cards []Card) int {
+	n := 0
+	for _, c := range cards {
+		if !IsDue(c) {
+			n++
+		}
+	}
+	return n
 }
 
 func shuffle(keys []string) {
@@ -146,15 +202,19 @@ func (s *Session) topUp(cards []Card) {
 		return
 	}
 	for len(s.held) > 0 && s.inPool(cards) < s.cfg.LearningPool {
-		key := s.held[0]
-		s.held = s.held[1:]
-		s.pending[key] = true
-		// Somewhere in what is left to do, rather than always at the end, so
-		// new words are spread through the sitting instead of queueing up
-		// behind the whole review backlog.
-		at := s.pos + rand.Intn(len(s.queue)-s.pos+1)
-		s.queue = slices.Insert(s.queue, at, key)
+		s.admit()
 	}
+}
+
+// admit moves the next held word into the sitting. It goes somewhere in what
+// is left to do, rather than always at the end, so new words are spread
+// through the sitting instead of queueing up behind the whole review backlog.
+func (s *Session) admit() {
+	key := s.held[0]
+	s.held = s.held[1:]
+	s.pending[key] = true
+	at := s.pos + rand.Intn(len(s.queue)-s.pos+1)
+	s.queue = slices.Insert(s.queue, at, key)
 }
 
 // CountStudyable reports how many cards a session started now would open with.
