@@ -1,3 +1,5 @@
+github.com/andresbott/litehtml-go v0.2.0 h1:n0ypX8YzapoNIZcF8LEzTI1vhOGiTzUPE9v7nRaFNcU=
+github.com/andresbott/litehtml-go v0.2.0/go.mod h1:Y/guKfxSL6Ylw546Tt/ToIPP9iW249gVTKVuSvkjYOQ=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 h1:LMLX+LgTNWpfvCBdFebv6EsYotImrt/Ppc5cXIriCSo=

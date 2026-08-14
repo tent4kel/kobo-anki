@@ -1,6 +1,6 @@
 module kobo-anki
 
-go 1.25.0
+go 1.25.7
 
 require (
 	github.com/open-spaced-repetition/go-fsrs/v3 v3.3.1
@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/andresbott/litehtml-go v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

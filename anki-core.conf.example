@@ -43,3 +43,14 @@ enable_short_term=true
 learning_pool=10
 mature_interval=7
 step_gap=3
+
+# Multiplier layered on top of each binary's own baseline correction for an
+# html/apkg card's literal CSS font sizes (real Anki templates assume a
+# normal ~96-160 DPI phone/desktop screen, tiny otherwise - this is true in
+# every browser cmd/server has been tested in, not just on the Kobo panel).
+# 1.0 means "accept that binary's baseline as-is": cmd/fbink's baseline is
+# the real detected screen DPI/96; cmd/server has no per-viewer DPI to
+# detect, so its baseline is a fixed assumption (serverBaselineScale in
+# cmd/server/main.go) roughly matching a Kobo panel. Raise or lower this if
+# that assumption is wrong for how you actually view server mode.
+html_font_scale=1.0

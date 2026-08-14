@@ -1,0 +1,20 @@
+/* Shared styling for html/apkg cards (core.FormatHTML), applied by both
+ * cmd/fbink and cmd/server on top of a deck's own baked-in CSS - see
+ * core.InjectIntoHead. It's injected right before </head>, so it cascades
+ * after and can override a deck's .card rules at equal specificity; it
+ * cannot override a deck's more specific selectors (e.g. ".card .cloze")
+ * without matching that specificity here too.
+ *
+ * Markdown/dict cards (core.Card.Format == "") never see this file - they
+ * go through goldmark + the hand-rolled layout engine, not litehtml.
+ *
+ * Empty by default: editing this file changes every apkg-imported deck's
+ * appearance at once, without re-running cmd/apkgimport. A commented-out
+ * example is below.
+ */
+
+/*
+.card {
+    font-family: Georgia, serif;
+}
+*/

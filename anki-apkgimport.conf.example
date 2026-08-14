@@ -1,0 +1,16 @@
+# Configuration for kobo-anki-apkgimport. Copy to anki-apkgimport.conf to
+# use - the command-line -split-tags flag, when given, overrides this file
+# rather than adding to it.
+
+# Comma-separated Anki tags to split into their own decks, named
+# "<deck> [tag]" (the -deck argument's value, not this file's name). A card
+# matching one of these tags goes into that tag's deck instead of the base
+# deck; matching more than one puts it in each matching tag's deck; matching
+# none of them leaves it in the base deck.
+#
+# "all" (or "*") splits by every tag actually found in the deck, instead of
+# a fixed list.
+#
+# Example: split_tags=verbs,irregular
+# Example: split_tags=all
+split_tags=

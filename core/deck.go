@@ -14,11 +14,11 @@ import "log"
 var DeckHeader = []string{
 	"front", "back", "due", "stability", "difficulty",
 	"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review",
-	"id",
+	"id", "format",
 }
 
 // DeckColumns is the canonical row width (len(DeckHeader)).
-const DeckColumns = 12
+const DeckColumns = 13
 
 // Column indices, for readers that pick fields out of a raw row.
 const (
@@ -46,7 +46,19 @@ const (
 	// front text in that case, which is the behaviour those decks already
 	// had.
 	ColID
+
+	// ColFormat says how Front/Back should be drawn: "" or "markdown" (the
+	// only thing that has ever existed) means goldmark + the hand-rolled
+	// layout engine; "html" means the face is already-resolved HTML/CSS,
+	// rendered through htmlrender/litehtml instead. Empty for every deck
+	// written before this column existed, which NormalizeRow widens to ""
+	// - exactly today's only behaviour, so old decks need no migration.
+	ColFormat
 )
+
+// FormatHTML is the ColFormat value for a card whose Front/Back are
+// already-resolved HTML/CSS rather than markdown.
+const FormatHTML = "html"
 
 // NewCardRow builds a row for a never-reviewed card: id/front/back filled
 // in, every scheduling field at its zero value, state = New.

@@ -2,9 +2,19 @@
 <html>
 <head>
 <title>Anki</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="/media/{{.Deck}}/">
 <style>
 html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
 a { text-decoration:none; color:#000; }
+/* .card-face is the one sizing hook markdown and html/apkg cards share -
+   see wrapCardFace in cmd/server/main.go. font-size/font-weight give
+   markdown content (which carries no styling of its own) the same look
+   the old per-template <font size="7"><b> used to; an html/apkg card's own
+   CSS below can override either for its own content. */
+.card-face { font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
+{{if .BackCardCSS}}{{.BackCardCSS}}{{end}}
+{{if .GlobalCardCSS}}{{.GlobalCardCSS}}{{end}}
 </style>
 </head>
 <body>
@@ -17,12 +27,14 @@ a { text-decoration:none; color:#000; }
 </td>
 </tr>
 </table>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="position:absolute;top:60px;bottom:120px;left:0;right:0;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0" style="position:absolute;top:60px;bottom:120px;left:0;right:0;">
 <tr>
 <td align="center" valign="middle">
+{{if not .IsHTML}}
 <font size="5" color="#666666">{{.FrontHeadwordHTML}}</font>
 <br><br>
-<font size="7"><b>{{.BackHTML}}</b></font>
+{{end}}
+{{.BackHTML}}
 </td>
 </tr>
 </table>

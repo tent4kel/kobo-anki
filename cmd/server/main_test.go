@@ -12,8 +12,9 @@ func TestNewStudyDataFrontHeadwordHTMLIsHeadwordOnly(t *testing.T) {
 	display := &core.Card{Front: "**ruim**, wijd, breed\n*een ruime kamer.*", Back: "**weit**"}
 	data := newStudyData(display, "deck", "ruim", false)
 
-	if data.FrontHTML != renderMD(display.Front) {
-		t.Errorf("FrontHTML = %q, want the full rendered front unchanged", data.FrontHTML)
+	wantFront := wrapCardFace(string(renderMD(display.Front)))
+	if data.FrontHTML != wantFront {
+		t.Errorf("FrontHTML = %q, want the full rendered front unchanged (wrapped in .card-face): %q", data.FrontHTML, wantFront)
 	}
 	wantHeadword := renderMD("**ruim**")
 	if data.FrontHeadwordHTML != wantHeadword {

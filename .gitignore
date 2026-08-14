@@ -6,8 +6,14 @@ kobo-vocab/kobo-vocab
 # can't be committed by accident
 cmd/fbink/fbink
 cmd/server/server
+cmd/apkgimport/apkgimport
 /fbink
 /server
+/apkgimport
+
+# build.sh's self-bootstrapped cross-compiler (downloaded on first build, not
+# vendored)
+.build-tools/
 
 # Deployment zips
 *.zip
@@ -17,9 +23,15 @@ dict/
 kobo-vocab/dict/
 kobo-vocab/kobodict/
 
+# Real Anki decks used for manual apkgimport testing - large, third-party,
+# not test fixtures this repo's own tests read
+test-apkgs/
+
 # User data
 words/
 *.csv
+# apkg-imported decks' media (images, and the archived source .apkg)
+*.media/
 # ...except the sample deck, so a fresh clone is runnable out of the box
 !french.csv
 *.sqlite
@@ -31,6 +43,7 @@ words/
 anki-core.conf
 anki-fbink.conf
 anki-mywords.conf
+anki-apkgimport.conf
 kobo-vocab/vocab.conf
 deploy.conf
 

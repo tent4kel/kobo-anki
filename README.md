@@ -47,6 +47,7 @@ Then connect the Kobo over USB and copy the files into `.adds/`, giving you this
 /mnt/onboard/.adds/kobo-anki/
 ├── bin/
 │   ├── kobo-anki-fbink
+│   ├── kobo-anki-apkgimport
 │   ├── kobo-anki-server
 │   ├── kobo-vocab
 │   └── fbink              ← from FBInk releases
@@ -55,6 +56,7 @@ Then connect the Kobo over USB and copy the files into `.adds/`, giving you this
 ├── anki-fbink.conf
 ├── anki-mywords.conf
 ├── cacert.pem              ← needed for the online providers, see below
+├── cards.css               ← shared styling for html/apkg cards, see below
 ├── dict/                   ← dicthtml-*.zip dictionaries
 ├── APIs/                   ← provider credentials, only if you use them
 ├── templates/              ← only needed for server mode
@@ -483,6 +485,47 @@ review history when the missing columns are filled in.
 
 `french.csv` in the repo root is a small ready-to-use sample deck — copy it into your
 `words/` directory to try the app before setting up any dictionaries.
+
+### cards.css
+
+Shared CSS for html/apkg cards (`Format` column = `html`, i.e. decks imported by
+`kobo-anki-apkgimport`) — plain-text cards from kobo-vocab/hand-written decks never touch this,
+they go through goldmark instead. It's injected into every such card right before `</head>`,
+so it cascades after — and can override at equal specificity — the deck's own CSS that
+`kobo-anki-apkgimport` baked in at import time. Edit it and restart the app (or reload the
+page in server mode); no need to re-run `kobo-anki-apkgimport`. Empty by default.
+
+A deck that embeds its own font via `@font-face` (declared in its own CSS, not `cards.css`)
+is honoured automatically — the referenced font file is loaded from the deck's own media,
+the same way `<img>` sources are. Without one, four bundled sans-serif faces (regular, bold,
+italic, bold-italic) cover everything else. A font is only picked up if a `@font-face` rule
+actually names it — one just sitting unused in a deck's media isn't detected on its own.
+
+**Using a Kobo system font.** `@font-face` in `cards.css` can reference one of the fonts
+already on the device (`/mnt/onboard/fonts/extra-kobo/*.ttf` etc.) by its literal absolute
+path — `src: url('/mnt/onboard/fonts/extra-kobo/KF_Literata-Regular.ttf')` — which
+`kobo-anki-fbink` reads directly off the filesystem, and `kobo-anki-server` serves to the
+browser from that same real path (via a route scoped to exactly that directory).
+
+**Per-deck styling.** `kobo-anki-apkgimport` writes each of a deck's note types' CSS to its
+own `style-<model>.css` in `<deck>.media/` (a deck usually has one or two note types, so
+usually one or two files) instead of baking a copy into every single card — on one real test
+deck that cut the CSV from 8.2MB to 3.1MB. Edit one of these files to restyle just that deck;
+it's written once and never overwritten by re-importing the same `.apkg` (delete it to reset
+to the deck's original CSS on the next import).
+
+### Splitting an apkg import by tag
+
+`kobo-anki-apkgimport -split-tags Ch1,Ch2` writes a separate deck per tag — `<deck> [Ch1]`,
+`<deck> [Ch2]` — pulling cards with that tag out of the base `<deck>`; a card matching more
+than one of the given tags is written into each matching tag's deck, and a card matching
+none of them stays in the base deck. `-split-tags all` (or `-split-tags "*"`) splits by every
+tag actually found in the deck instead of naming them — note a bare `-split-tags` with no
+value at all isn't safe to support: Go's flag parser would silently consume whatever comes
+next on the command line (even another flag like `-deck`) as its value, so `all`/`*` is the
+explicit way to ask for that. `split_tags=` in `anki-apkgimport.conf` (see
+`anki-apkgimport.conf.example`) sets a default so it doesn't need retyping every import; a
+`-split-tags` flag, when given, overrides the config file rather than adding to it.
 
 **Spreadsheet-friendly.** Decks are written as UTF-8 with a BOM and CRLF row terminators, so
 they open correctly by double-click in Excel and Numbers — without the BOM, Excel guesses the

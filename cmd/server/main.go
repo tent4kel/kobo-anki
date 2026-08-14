@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,12 +17,21 @@ import (
 	"github.com/yuin/goldmark"
 )
 
+// serverBaselineScale is the default zoom applied to every html/apkg card
+// before htmlFontScale - see htmlCardHTML's doc comment.
+const serverBaselineScale = 3.0
+
 var (
-	cards   []core.Card
-	cardsMu sync.RWMutex
-	tmpl    *template.Template
-	csvFile string
-	dataDir = "."
+	cards         []core.Card
+	cardsMu       sync.RWMutex
+	tmpl          *template.Template
+	csvFile       string
+	dataDir       = "."
+	htmlFontScale = 1.0 // see newStudyData; set from coreCfg.HTMLFontScale in main()
+	// globalCardCSS is cards.css's raw content read once at startup ("" if
+	// the file doesn't exist), threaded into every studyData so
+	// front.html/back.html can put it in a real <style> tag.
+	globalCardCSS string
 
 	// The running order for the deck currently being studied. This server is
 	// a single-user local thing - one browser, one deck at a time - so one
@@ -32,7 +42,12 @@ var (
 )
 
 type studyData struct {
-	Card      *core.Card
+	Card *core.Card
+	// FrontHTML/BackHTML are pre-wrapped in <div class="card-face">...</div>
+	// (see wrapCardFace) - the one CSS hook both markdown and html/apkg
+	// cards render through, so .card-face { zoom: ... } in front.html/
+	// back.html's own <style> applies the same way to either, and neither
+	// template needs its own per-format markup.
 	FrontHTML template.HTML
 	// FrontHeadwordHTML is just the leading **bold** headword out of
 	// FrontHTML's source, for the small gray "front repeated" field on the
@@ -40,11 +55,74 @@ type studyData struct {
 	// alternatives and an example too, which is too much to restate there;
 	// this is a reminder of which word the card is about, not a second
 	// copy of the front page (which still uses the full FrontHTML).
+	//
+	// back.html only shows it when IsHTML is false: an html/apkg card's own
+	// BackHTML already opens with the resolved front content (real Anki's
+	// stock Afmt is "{{FrontSide}}<hr id=answer>{{Back}}", baked in by
+	// cmd/apkgimport), so showing this too would repeat the queried word
+	// twice in a row - once here, once from the card's own {{FrontSide}}.
 	FrontHeadwordHTML template.HTML
 	BackHTML          template.HTML
-	Deck              string
-	Key               string // card.Key() - stable id when present, else the front text
-	Reverse           bool
+	// FrontCardCSS/BackCardCSS are the deck's own CSS for an html/apkg
+	// card (cmd/apkgimport's baked-in model CSS), extracted out of the
+	// wrapped document cmd/apkgimport stored so it can go in the page's own
+	// real <head> instead of a second, nested one - see
+	// core.ExtractCardDocument. Empty for a markdown card; there's nothing
+	// to extract.
+	FrontCardCSS template.CSS
+	BackCardCSS  template.CSS
+	// GlobalCardCSS is cards.css's raw content, same for every card and
+	// every format - see main()'s startup load.
+	GlobalCardCSS template.CSS
+	// CardScale is applied to .card-face uniformly for markdown and
+	// html/apkg cards alike (see front.html/back.html) - the two used to
+	// size completely differently (a fixed legacy <font size="7"> for
+	// markdown, an ad hoc zoom only for html), which is what made them
+	// look inconsistent with each other.
+	CardScale float64
+	IsHTML    bool
+	Deck      string
+	Key       string // card.Key() - stable id when present, else the front text
+	Reverse   bool
+}
+
+// wrapCardFace wraps a card face's body content (already-trusted HTML, from
+// either goldmark or cmd/apkgimport's resolved output) in the one element
+// front.html/back.html's .card-face CSS rule targets.
+func wrapCardFace(innerHTML string) template.HTML {
+	return template.HTML(`<div class="card-face">` + innerHTML + `</div>`)
+}
+
+// styleCache holds deck stylesheets already read this run, keyed by
+// "<deck>/<file>" - a card's model stylesheet is the same for every card
+// sharing that model, so re-reading it from disk on every single card shown
+// would be exactly the kind of waste ensureDeckLoaded was just added to
+// eliminate for the CSV itself.
+var styleCache = map[string]string{}
+
+// resolveCardCSS splits a card face into its CSS and body content,
+// regardless of which of the two shapes cmd/apkgimport has ever produced:
+// the current one, a "<!--css:slug-->" reference to a deduped
+// style-slug.css in the deck's media dir (core.ExtractCardStyleRef), or the
+// older one, a full baked-in <html><head><style>...</style></head><body>
+// document (core.ExtractCardDocument) from a deck imported before dedup
+// existed and not re-imported since.
+func resolveCardCSS(deck, cardFace string) (css, body string) {
+	cssFile, body, ok := core.ExtractCardStyleRef(cardFace)
+	if !ok {
+		return core.ExtractCardDocument(cardFace)
+	}
+	key := deck + "/" + cssFile
+	if cached, ok := styleCache[key]; ok {
+		return cached, body
+	}
+	data, err := os.ReadFile(filepath.Join(core.DeckMediaDir(dataDir, deck), cssFile))
+	if err != nil {
+		return "", body // unstyled, not a failed render
+	}
+	css = string(data)
+	styleCache[key] = css
+	return css, body
 }
 
 // renderMD converts a card field (which may be Markdown emitted by
@@ -60,16 +138,85 @@ func renderMD(s string) template.HTML {
 	return template.HTML(buf.String())
 }
 
+// newStudyData resolves a card's faces for a template. Streamlined so
+// markdown and html/apkg cards go through exactly one shared rendering
+// concern - wrapCardFace + the .card-face CSS rule in front.html/back.html -
+// instead of the html branch carrying its own bespoke sizing/injection
+// logic: that used to inject a per-card <base>/zoom/<style> into a second,
+// nested <head> embedded mid-page, which broke in two different ways (a
+// viewport meta tag there is never honoured; a body{} selector there
+// matches the page's one real <body>, not just the card, so it zoomed the
+// surrounding chrome too). <base> now lives as a plain, static tag in each
+// template's real <head> instead - see front.html/back.html.
 func newStudyData(display *core.Card, deck, key string, reverse bool) studyData {
-	return studyData{
-		Card:              display,
-		FrontHTML:         renderMD(display.Front),
-		FrontHeadwordHTML: renderMD(core.HeadwordOnly(display.Front)),
-		BackHTML:          renderMD(display.Back),
-		Deck:              deck,
-		Key:               key,
-		Reverse:           reverse,
+	data := studyData{
+		Card:          display,
+		Deck:          deck,
+		Key:           key,
+		Reverse:       reverse,
+		GlobalCardCSS: template.CSS(globalCardCSS),
+		// cmd/fbink auto-computes its correction from the real screen it
+		// draws to (screenDPI/96); cmd/server has no such detection - it
+		// serves whatever browser/device asks - so serverBaselineScale is a
+		// fixed assumption rather than a measurement, roughly matching a
+		// Kobo panel since that's this project's primary target.
+		// htmlFontScale layers on top the same way it does for fbink: 1.0
+		// means "accept this baseline as-is", not "no scaling at all".
+		CardScale: serverBaselineScale * htmlFontScale,
 	}
+
+	if core.IsHTML(*display) {
+		frontCSS, frontBody := resolveCardCSS(deck, display.Front)
+		backCSS, backBody := resolveCardCSS(deck, display.Back)
+		data.FrontHTML = wrapCardFace(frontBody)
+		data.FrontCardCSS = template.CSS(frontCSS)
+		data.FrontHeadwordHTML = template.HTML(core.HeadwordOnlyHTML(display.Front))
+		data.BackHTML = wrapCardFace(backBody)
+		data.BackCardCSS = template.CSS(backCSS)
+		data.IsHTML = true
+		return data
+	}
+
+	data.FrontHTML = wrapCardFace(string(renderMD(display.Front)))
+	data.FrontHeadwordHTML = renderMD(core.HeadwordOnly(display.Front))
+	data.BackHTML = wrapCardFace(string(renderMD(display.Back)))
+	return data
+}
+
+// ensureDeckLoaded loads deck's CSV into the shared cards/csvFile globals
+// only if it isn't already the deck cached there - every request handler
+// used to call core.LoadCards unconditionally, so a single "flip, then
+// rate" cycle did three full CSV parses (/study, /back, /rate) plus a full
+// rewrite (SaveCards in rateHandler), every time, regardless of whether
+// anything on disk had actually changed since the last request. For a
+// large apkg-imported deck - thousands of cards, each face carrying its
+// own copy of the deck's CSS (cmd/apkgimport bakes it in per face; see the
+// CSS-dedup discussion this was raised alongside) - that's several
+// megabytes parsed and rewritten per tap. cmd/fbink never had this
+// problem: it loads a deck once per sitting and keeps it in memory:
+// openDeck in cmd/fbink/main.go.
+//
+// This makes the same assumption cmd/fbink already does - this process is
+// the only writer that matters for the deck it's actively reviewing - so a
+// change made by another process to the same CSV while this deck is open
+// here won't be picked up until the deck is switched away and back (or the
+// server restarts). That's not a new risk: TODO.md already documents "no
+// locking between server and fbink binaries... running both concurrently
+// is last-writer-wins" as an accepted, existing tradeoff.
+//
+// Caller must hold cardsMu.
+func ensureDeckLoaded(deck string) error {
+	path := core.DeckCSVPath(dataDir, deck)
+	if csvFile == path {
+		return nil
+	}
+	loaded, err := core.LoadCards(path)
+	if err != nil {
+		return err
+	}
+	csvFile = path
+	cards = loaded
+	return nil
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request) {
@@ -108,9 +255,7 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	reverse := r.URL.Query().Get("reverse") == "1"
 
 	cardsMu.Lock()
-	csvFile = core.DeckCSVPath(dataDir, deck)
-	var err error
-	cards, err = core.LoadCards(csvFile)
+	err := ensureDeckLoaded(deck)
 	// ahead is only ever set by the link on the done page. Once the sitting
 	// exists it carries on under sessionDeck like any other, so nothing else -
 	// the rating links, the reverse toggle - has to thread the flag through.
@@ -164,8 +309,7 @@ func backHandler(w http.ResponseWriter, r *http.Request) {
 	reverse := r.URL.Query().Get("reverse") == "1"
 
 	cardsMu.Lock()
-	csvFile = core.DeckCSVPath(dataDir, deck)
-	cards, _ = core.LoadCards(csvFile)
+	_ = ensureDeckLoaded(deck)
 	cardsMu.Unlock()
 
 	cardsMu.RLock()
@@ -195,8 +339,7 @@ func rateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardsMu.Lock()
-	csvFile = core.DeckCSVPath(dataDir, deck)
-	cards, _ = core.LoadCards(csvFile)
+	_ = ensureDeckLoaded(deck)
 	if cur := session.Current(cards); sessionDeck == deck && cur != nil && cur.Key() == front {
 		session.Rate(cards, rating)
 		core.SaveCards(csvFile, cards)
@@ -221,8 +364,7 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	deck := r.URL.Query().Get("deck")
 
 	cardsMu.Lock()
-	csvFile = core.DeckCSVPath(dataDir, deck)
-	cards, _ = core.LoadCards(csvFile)
+	_ = ensureDeckLoaded(deck)
 	cardsMu.Unlock()
 
 	cardsMu.RLock()
@@ -243,9 +385,43 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl.ExecuteTemplate(w, "stats", data)
 }
 
+// mediaHandler serves an apkg-imported deck's media (images, referenced by
+// core.DeckMediaDir(dataDir, deck)) at /media/<deck>/<file>. filepath.Base
+// strips any directory components from the requested file, so a request
+// can't escape the deck's media directory.
+func mediaHandler(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/media/")
+	deck, file, ok := strings.Cut(rest, "/")
+	if !ok || deck == "" || file == "" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(core.DeckMediaDir(dataDir, deck), filepath.Base(file)))
+}
+
+// koboFontsHandler serves the Kobo's own bundled fonts directly from their
+// real on-device path, so a @font-face rule in cards.css (or a deck's own
+// stylesheet) can reference one with its literal absolute path -
+// url('/mnt/onboard/fonts/extra-kobo/KF_Literata-Regular.ttf') - and have
+// it work unchanged in cmd/fbink (which reads that path straight off the
+// filesystem, see deckMediaResolver in cmd/fbink/htmlcard.go) and here,
+// where the browser instead requests that same absolute path as a URL.
+//
+// http.ServeFile itself rejects any request path containing ".." before
+// this ever runs, so this can't be used to walk outside /mnt/onboard/fonts;
+// registering it at that one fixed prefix (see main, below) is what keeps
+// it from serving anything else on the device at all.
+func koboFontsHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, r.URL.Path)
+}
+
 func main() {
 	coreCfg := core.LoadCoreConfig("anki-core.conf")
 	dataDir = coreCfg.DataDir
+	htmlFontScale = coreCfg.HTMLFontScale
+	if css, err := os.ReadFile("cards.css"); err == nil {
+		globalCardCSS = string(css)
+	}
 	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 
@@ -269,6 +445,8 @@ func main() {
 	http.HandleFunc("/back", backHandler)
 	http.HandleFunc("/rate", rateHandler)
 	http.HandleFunc("/stats", statsHandler)
+	http.HandleFunc("/media/", mediaHandler)
+	http.HandleFunc("/mnt/onboard/fonts/", koboFontsHandler)
 	http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("<html><body bgcolor='#FFFFFF'><center><br><br><br><font size='6'><b>Server stopped.</b></font></center></body></html>"))

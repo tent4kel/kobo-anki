@@ -205,12 +205,18 @@ const (
 const EVIOCGRAB = 0x40044590
 
 var (
-	cards       []core.Card
-	csvFile     string
-	dataDir     = "."
-	currentDeck string
-	currentCard *core.Card
-	decks       []string
+	cards         []core.Card
+	csvFile       string
+	dataDir       = "."
+	currentDeck   string
+	currentCard   *core.Card
+	decks         []string
+	htmlFontScale = 1.0 // see drawHTMLLabel; set from coreCfg.HTMLFontScale in main()
+	// globalCardCSSTag is "<style>...</style>" built from cards.css at
+	// startup, or "" if that file doesn't exist - core.InjectIntoHead is a
+	// no-op on an empty extra, so drawHTMLLabel can always call it
+	// unconditionally.
+	globalCardCSSTag string
 
 	// session is the running order for the deck currently open, and
 	// sessionCfg the learning-mode policy it was built from.
@@ -1011,7 +1017,11 @@ func drawFrontScreen() {
 	availTop := backRect.Y + backRect.H + gap
 	availRect := Rect{contentRect.X, availTop, contentRect.W, actionRect.Y - availTop}
 	cardRect := inset(availRect, activeStyle.Margin)
-	drawMarkdownLabel(cardRect, displayFront(), FontFront, activeStyle.SizeCard, "", AlignCenter, true)
+	if currentCard != nil && core.IsHTML(*currentCard) {
+		drawHTMLLabel(cardRect, displayFront(), true)
+	} else {
+		drawMarkdownLabel(cardRect, displayFront(), FontFront, activeStyle.SizeCard, "", AlignCenter, true)
+	}
 
 	// Any tap on content or action area shows answer
 	sceneAdd("show", contentRect)
@@ -1051,16 +1061,34 @@ func drawBackScreen() {
 	if regular, err := makeFaceResolver(FontFront, activeStyle.SizeMenu)(StyleRegular); err == nil {
 		frontLineHeight = scaledLineHeight(regular.Face)
 	}
-	frontRect := Rect{cardRect.X, cardRect.Y, cardRect.W, frontLineHeight * 2}
-	drawMarkdownLabel(frontRect, core.HeadwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
+	// An html/apkg card's own Back already opens with the resolved front
+	// content: real Anki's stock Afmt is literally
+	// "{{FrontSide}}<hr id=answer>{{Back}}", and cmd/apkgimport bakes that
+	// resolved Answer HTML straight into the card - so the reminder below
+	// is only drawn for markdown cards, where kobo-vocab's Back never
+	// repeats the front on its own. Drawing it for an html card duplicated
+	// the queried word: once from this label, once from the card's own
+	// {{FrontSide}}.
+	htmlCard := currentCard != nil && core.IsHTML(*currentCard)
 
-	// Answer text — this rect is itself fixed (anchored right below the
-	// fixed frontRect), so centering within it can't cause any jumping;
-	// only the answer's own content shifts its centering, never the front
-	// label's position.
-	answerTop := frontRect.Y + frontRect.H + gap
-	answerRect := Rect{cardRect.X, answerTop, cardRect.W, cardRect.Y + cardRect.H - answerTop}
-	drawMarkdownLabel(answerRect, displayBack(), FontBack, activeStyle.SizeCard, "", AlignCenter, true)
+	answerRect := cardRect
+	if !htmlCard {
+		frontRect := Rect{cardRect.X, cardRect.Y, cardRect.W, frontLineHeight * 2}
+		drawMarkdownLabel(frontRect, core.HeadwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
+
+		// Answer text — this rect is itself fixed (anchored right below the
+		// fixed frontRect), so centering within it can't cause any jumping;
+		// only the answer's own content shifts its centering, never the front
+		// label's position.
+		answerTop := frontRect.Y + frontRect.H + gap
+		answerRect = Rect{cardRect.X, answerTop, cardRect.W, cardRect.Y + cardRect.H - answerTop}
+	}
+
+	if htmlCard {
+		drawHTMLLabel(answerRect, displayBack(), true)
+	} else {
+		drawMarkdownLabel(answerRect, displayBack(), FontBack, activeStyle.SizeCard, "", AlignCenter, true)
+	}
 
 	// Rating buttons: 2x2 grid in action zone
 	actionInner := inset(actionRect, gap/2)
@@ -1144,6 +1172,10 @@ func main() {
 	coreCfg := core.LoadCoreConfig("anki-core.conf")
 	dataDir = coreCfg.DataDir
 	reverseMode = coreCfg.Reverse
+	htmlFontScale = coreCfg.HTMLFontScale
+	if css, err := os.ReadFile("cards.css"); err == nil {
+		globalCardCSSTag = "<style>" + string(css) + "</style>"
+	}
 	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 

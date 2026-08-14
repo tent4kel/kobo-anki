@@ -23,6 +23,19 @@ type CoreConfig struct {
 	LearningPool   int
 	MatureInterval int
 	StepGap        int
+
+	// HTMLFontScale is a multiplier layered on top of each binary's own
+	// baseline correction for an html/apkg card's literal CSS font sizes -
+	// real Anki templates are authored assuming a normal ~96-160 DPI
+	// phone/desktop screen, so "20px" is tiny both on the Kobo panel's
+	// ~300 DPI and, in practice, in every browser cmd/server has been
+	// tested in (including modern ones - a browser's own DPI handling
+	// turned out not to be a substitute for this). 1.0 means "accept that
+	// binary's baseline as-is", not "no scaling at all": cmd/fbink's
+	// baseline is the real detected screenDPI/96; cmd/server has no
+	// per-viewer DPI to detect, so its baseline (serverBaselineScale) is a
+	// fixed assumption instead.
+	HTMLFontScale float64
 }
 
 // Session returns the learning-mode policy these settings describe.
@@ -43,6 +56,7 @@ func LoadCoreConfig(path string) CoreConfig {
 		LearningPool:     10,
 		MatureInterval:   7,
 		StepGap:          3,
+		HTMLFontScale:    1.0,
 	}
 
 	f, err := os.Open(path)
@@ -98,6 +112,10 @@ func LoadCoreConfig(path string) CoreConfig {
 			if v, ok := warn.Int(lineNo, key, val); ok {
 				cfg.StepGap = v
 			}
+		case "html_font_scale":
+			if v, ok := warn.Float(lineNo, key, val); ok {
+				cfg.HTMLFontScale = v
+			}
 		default:
 			warn.UnknownKey(lineNo, key)
 		}
@@ -122,6 +140,13 @@ type Card struct {
 	// decks predating the column leave it empty. Use Key, not this field
 	// directly, to look a card up.
 	ID string
+
+	// Format says how Front/Back should be drawn: "" means markdown (every
+	// card before this field existed, and everything kobo-vocab produces
+	// today), FormatHTML means already-resolved HTML/CSS. Use IsHTML rather
+	// than comparing this directly, so a future non-markdown, non-html value
+	// still falls back to markdown instead of failing to render at all.
+	Format string
 
 	Due           time.Time
 	Stability     float64
@@ -148,6 +173,14 @@ func (c *Card) Key() string {
 		return c.ID
 	}
 	return c.Front
+}
+
+// IsHTML reports whether a card's Front/Back are already-resolved HTML/CSS
+// rather than markdown. Both review UIs branch on this, not on comparing
+// Format directly, so an unrecognised future value falls back to markdown
+// (today's only behaviour) instead of failing to render.
+func IsHTML(c Card) bool {
+	return c.Format == FormatHTML
 }
 
 var scheduler = fsrs.NewFSRS(fsrs.DefaultParam())
@@ -207,6 +240,47 @@ func DeckCSVPath(dataDir, deckName string) string {
 	return filepath.Join(dataDir, deckName+".csv")
 }
 
+// DeckMediaDir is where a deck's referenced media (images, and for an
+// apkg-imported deck the archived source .apkg itself) lives on disk.
+// cmd/apkgimport writes into it, htmlrender.Container's MediaResolver and
+// cmd/server's static file route both read from it - one definition so the
+// three agree, the same reason DeckCSVPath exists as a shared helper rather
+// than three ad hoc filepath.Join calls.
+func DeckMediaDir(dataDir, deckName string) string {
+	return filepath.Join(dataDir, deckName+".media")
+}
+
+// CardFromRow builds a Card from one raw CSV row (widening it via
+// NormalizeRow first), so anything that reads deck rows - LoadCards, and any
+// content provider that wants to merge into an existing deck the way
+// kobo-vocab and cmd/apkgimport both do - parses them identically. ok is
+// false for a row NormalizeRow rejects as too short to be a card at all.
+func CardFromRow(row []string) (c Card, ok bool) {
+	normalized, ok := NormalizeRow(row)
+	if !ok {
+		return Card{}, false
+	}
+
+	c = Card{
+		Front:      normalized[ColFront],
+		Back:       normalized[ColBack],
+		ID:         normalized[ColID],
+		Format:     normalized[ColFormat],
+		Due:        parseTime(normalized[ColDue]),
+		LastReview: parseTime(normalized[ColLastReview]),
+	}
+	c.Stability, _ = strconv.ParseFloat(normalized[ColStability], 64)
+	c.Difficulty, _ = strconv.ParseFloat(normalized[ColDifficulty], 64)
+	c.ElapsedDays, _ = strconv.ParseUint(normalized[ColElapsedDays], 10, 64)
+	c.ScheduledDays, _ = strconv.ParseUint(normalized[ColScheduledDays], 10, 64)
+	c.Reps, _ = strconv.ParseUint(normalized[ColReps], 10, 64)
+	c.Lapses, _ = strconv.ParseUint(normalized[ColLapses], 10, 64)
+	state, _ := strconv.Atoi(normalized[ColState])
+	c.State = fsrs.State(state)
+
+	return c, true
+}
+
 func LoadCards(csvFile string) ([]Card, error) {
 	file, err := os.Open(csvFile)
 	if err != nil {
@@ -225,27 +299,10 @@ func LoadCards(csvFile string) ([]Card, error) {
 			warnIfNotHeader(csvFile, row)
 			continue
 		}
-		normalized, ok := NormalizeRow(row)
+		c, ok := CardFromRow(row)
 		if !ok {
 			continue
 		}
-
-		c := Card{
-			Front:      normalized[ColFront],
-			Back:       normalized[ColBack],
-			ID:         normalized[ColID],
-			Due:        parseTime(normalized[ColDue]),
-			LastReview: parseTime(normalized[ColLastReview]),
-		}
-		c.Stability, _ = strconv.ParseFloat(normalized[ColStability], 64)
-		c.Difficulty, _ = strconv.ParseFloat(normalized[ColDifficulty], 64)
-		c.ElapsedDays, _ = strconv.ParseUint(normalized[ColElapsedDays], 10, 64)
-		c.ScheduledDays, _ = strconv.ParseUint(normalized[ColScheduledDays], 10, 64)
-		c.Reps, _ = strconv.ParseUint(normalized[ColReps], 10, 64)
-		c.Lapses, _ = strconv.ParseUint(normalized[ColLapses], 10, 64)
-		state, _ := strconv.Atoi(normalized[ColState])
-		c.State = fsrs.State(state)
-
 		cards = append(cards, c)
 	}
 	return cards, nil
@@ -275,6 +332,7 @@ func SaveCards(csvFile string, cards []Card) error {
 				strconv.Itoa(int(c.State)),
 				formatTime(c.LastReview),
 				c.ID,
+				c.Format,
 			})
 		}
 		w.Flush()

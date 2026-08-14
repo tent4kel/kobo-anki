@@ -20,7 +20,7 @@
 #
 # Never touches words/ (your live flashcard progress) or logs on-device -
 # only the files that ship in the tarball (bin/, APIs/, templates/,
-# start*.sh, *.conf, french.csv, cacert.pem) get uploaded/overwritten.
+# start*.sh, *.conf, french.csv, cacert.pem, cards.css) get uploaded/overwritten.
 #
 # Dictionaries are the one exception to "everything lands under the app
 # folder": dict/*.zip go to /mnt/onboard/.kobo/custom-dict, which is Nickel's
@@ -57,19 +57,24 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/kobo-anki/bin" "$STAGE/kobo-anki/templates"
-cp bin/kobo-anki-fbink bin/kobo-anki-server bin/kobo-vocab "$STAGE/kobo-anki/bin/"
+cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vocab "$STAGE/kobo-anki/bin/"
 # fbink itself is only uploaded if you already have one built/placed in
 # bin/ locally - it needs an image-support-enabled build (see README), and
 # this script won't silently overwrite a working device copy with nothing.
 [ -f bin/fbink ] && cp bin/fbink "$STAGE/kobo-anki/bin/"
 cp start.sh start-debug.sh start-fbink.sh start-server.sh "$STAGE/kobo-anki/"
 cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/kobo-anki/"
+# apkgimport's split_tags config - optional, most imports don't use it.
+[ -f anki-apkgimport.conf ] && cp anki-apkgimport.conf "$STAGE/kobo-anki/"
 # CA bundle for the network providers' TLS verification - some Kobo
 # firmware ships with no system CA store at all (see ca_cert in
 # anki-mywords.conf.example), so this is deployed unconditionally.
 cp cacert.pem "$STAGE/kobo-anki/"
 cp templates/*.html "$STAGE/kobo-anki/templates/"
 [ -f french.csv ] && cp french.csv "$STAGE/kobo-anki/"
+# Shared styling for html/apkg cards (core.InjectIntoHead) - not overwritten
+# blindly by anything else, safe to redeploy after editing it.
+[ -f cards.css ] && cp cards.css "$STAGE/kobo-anki/"
 # APIs/ (provider credentials, e.g. lexicala.json) - gitignored and only
 # deployed if you've actually populated it; providers=lexicala on-device
 # needs this to work at all.
