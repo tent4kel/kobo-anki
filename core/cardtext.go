@@ -136,6 +136,17 @@ func ExtractCardStyleRef(cardFace string) (cssFile, body string, ok bool) {
 // HeadwordOnlyHTML reminder label) is returned unchanged - there is nowhere
 // to inject into, and one is not worth manufacturing for a label with no
 // styling of its own to override.
+// BaseCardCSS approximates the handful of default rules real Anki's
+// reviewer webview applies on top of every note type's own CSS. Most
+// importantly: a note type's CSS rarely constrains <img> sizing itself,
+// because Anki's own webview already caps oversized source images (a
+// full-resolution photo dropped straight into a note, common in
+// image-heavy decks) to fit the available space. litehtml has no such
+// built-in opinion - without this, an image renders at its native pixel
+// size, which reads as "images are huge" on decks that never needed their
+// own sizing rule because real Anki was doing it for them.
+const BaseCardCSS = `img { max-width: 100%; height: auto; }`
+
 func InjectIntoHead(cardFace, extra string) string {
 	if extra == "" {
 		return cardFace

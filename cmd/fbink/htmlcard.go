@@ -45,6 +45,20 @@ func drawHTMLLabel(r Rect, html string, centerV bool) {
 		html = "<html><head><style>" + css + "</style></head><body>" + body + "</body></html>"
 	}
 	html = core.InjectIntoHead(html, globalCardCSSTag)
+	// core.BaseCardCSS (in globalCardCSSTag) already caps a raw image's
+	// *width* to the card; it can't also cap height there, because that
+	// needs a concrete pixel budget only known here, per call, from r.H (a
+	// front face and a back face - which reserves space for the rating
+	// buttons - have different budgets). Injected last, after
+	// globalCardCSSTag, so it wins the cascade for this one property
+	// without touching max-width/height:auto already set there - the
+	// browser/litehtml replaced-element sizing algorithm applies both
+	// constraints together, same as object-fit:contain would.
+	maxImgHeight := int(float32(r.H) / scale)
+	if maxImgHeight < 1 {
+		maxImgHeight = 1
+	}
+	html = core.InjectIntoHead(html, fmt.Sprintf("<style>img{max-height:%dpx}</style>", maxImgHeight))
 	rendered, err := htmlrender.RenderCard(html, r.W, deckMediaResolver(), scale)
 	if err != nil {
 		if debug {
@@ -58,7 +72,19 @@ func drawHTMLLabel(r Rect, html string, centerV bool) {
 		target = centerRectV(r, rendered.Bounds().Dy())
 	}
 	dst := image.Rect(target.X, target.Y, target.X+rendered.Bounds().Dx(), target.Y+rendered.Bounds().Dy())
-	draw.Draw(canvas.Img, dst, rendered, image.Point{}, draw.Over)
+	// Clip to r: draw.Draw only clips against the canvas's own bounds (the
+	// whole screen), not against this label's allotted rect - without this,
+	// content still too tall after the max-height cap above (long text, or
+	// a max-height edge case) would spill into whatever's drawn below, e.g.
+	// the rating buttons on the back screen, instead of being cleanly
+	// cropped at the card's own boundary.
+	bound := image.Rect(r.X, r.Y, r.X+r.W, r.Y+r.H)
+	clipped := dst.Intersect(bound)
+	if clipped.Empty() {
+		return
+	}
+	sp := image.Point{X: clipped.Min.X - dst.Min.X, Y: clipped.Min.Y - dst.Min.Y}
+	draw.Draw(canvas.Img, clipped, rendered, sp, draw.Over)
 }
 
 // styleCache holds deck stylesheets already read this run, keyed by

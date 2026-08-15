@@ -1,35 +1,53 @@
 {{define "back"}}
+<!DOCTYPE html>
 <html>
 <head>
 <title>Anki</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 <base href="/media/{{.Deck}}/">
 <style>
+/* See front.html - old-style layout only, deliberately: calc() silently
+   dropped the whole max-height declaration, and this browser's zoom
+   slider desyncs position:fixed from the visual viewport (a browser-chrome
+   control, confirmed not fixable via user-scalable=no). The header/
+   content/rating-buttons split below is a plain three-row height:100%
+   table instead, immune to that desync since it never leaves flow. Every
+   label is centered by a table cell's own valign="middle", never by
+   height:Npx;line-height:Npx - see front.html for why that matters here. */
 html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
 a { text-decoration:none; color:#000; }
 /* .card-face is the one sizing hook markdown and html/apkg cards share -
    see wrapCardFace in cmd/server/main.go. font-size/font-weight give
    markdown content (which carries no styling of its own) the same look
    the old per-template <font size="7"><b> used to; an html/apkg card's own
-   CSS below can override either for its own content. */
-.card-face { font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
+   CSS below can override either for its own content. height:100% keeps
+   this a definite-height link in the chain the image's percentage
+   max-height below resolves against - see front.html. */
+.card-face { display: block; height: 100%; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
 {{if .BackCardCSS}}{{.BackCardCSS}}{{end}}
 {{if .GlobalCardCSS}}{{.GlobalCardCSS}}{{end}}
+/* See front.html: a plain percentage, no viewport unit or CardScale
+   division needed. "Image max size is 50% height, 100% width." */
+.card-face img { max-width: 100%; max-height: 50%; }
 </style>
 </head>
 <body>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eee;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
 <tr>
-<td height="60" align="center">
-<a href="/" style="display:block;height:60px;line-height:60px;">
+<td height="60" style="background-color:#eee;">
+<a href="/" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
 <font size="4">[decks]</font>
+</td></tr></table>
 </a>
 </td>
 </tr>
-</table>
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0" style="position:absolute;top:60px;bottom:120px;left:0;right:0;">
 <tr>
-<td align="center" valign="middle">
+<td height="100%">
+<div style="height:100%;overflow-y:auto;overflow-x:hidden;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td height="100%" align="center" valign="middle">
 {{if not .IsHTML}}
 <font size="5" color="#666666">{{.FrontHeadwordHTML}}</font>
 <br><br>
@@ -38,19 +56,43 @@ a { text-decoration:none; color:#000; }
 </td>
 </tr>
 </table>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="position:fixed;bottom:0;left:0;">
+</div>
+</td>
+</tr>
+<tr>
+<td height="120">
+<table width="100%" height="120" cellpadding="0" cellspacing="0" border="0">
 <tr>
 <td width="25%" height="120" align="center" style="background-color:#ddd;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=1&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Again</b></font></a>
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=1&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
+<font size="5"><b>Again</b></font>
+</td></tr></table>
+</a>
 </td>
 <td width="25%" height="120" align="center" style="background-color:#ccc;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=2&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Hard</b></font></a>
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=2&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
+<font size="5"><b>Hard</b></font>
+</td></tr></table>
+</a>
 </td>
 <td width="25%" height="120" align="center" style="background-color:#bbb;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=3&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Good</b></font></a>
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=3&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
+<font size="5"><b>Good</b></font>
+</td></tr></table>
+</a>
 </td>
 <td width="25%" height="120" align="center" style="background-color:#aaa;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=4&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;width:100%;height:120px;line-height:120px;"><font size="5"><b>Easy</b></font></a>
+<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=4&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
+<font size="5"><b>Easy</b></font>
+</td></tr></table>
+</a>
+</td>
+</tr>
+</table>
 </td>
 </tr>
 </table>

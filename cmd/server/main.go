@@ -415,12 +415,29 @@ func koboFontsHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, r.URL.Path)
 }
 
+// noCache marks a handler's response as never cacheable. Every page here is
+// generated from live review state (which card is due, what its current
+// scheduling is) - a stale cached copy served back after a rating or on
+// back/forward navigation would show the wrong card or the wrong button
+// state. Also handy for development: without this, tracking down whether a
+// browser is actually seeing a new build or just replaying an old cached
+// response is its own separate debugging problem.
+func noCache(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		h(w, r)
+	}
+}
+
 func main() {
 	coreCfg := core.LoadCoreConfig("anki-core.conf")
 	dataDir = coreCfg.DataDir
 	htmlFontScale = coreCfg.HTMLFontScale
+	globalCardCSS = core.BaseCardCSS
 	if css, err := os.ReadFile("cards.css"); err == nil {
-		globalCardCSS = string(css)
+		globalCardCSS += string(css)
 	}
 	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
@@ -440,11 +457,11 @@ func main() {
 		}
 	}
 
-	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/study", studyHandler)
-	http.HandleFunc("/back", backHandler)
-	http.HandleFunc("/rate", rateHandler)
-	http.HandleFunc("/stats", statsHandler)
+	http.HandleFunc("/", noCache(indexHandler))
+	http.HandleFunc("/study", noCache(studyHandler))
+	http.HandleFunc("/back", noCache(backHandler))
+	http.HandleFunc("/rate", noCache(rateHandler))
+	http.HandleFunc("/stats", noCache(statsHandler))
 	http.HandleFunc("/media/", mediaHandler)
 	http.HandleFunc("/mnt/onboard/fonts/", koboFontsHandler)
 	http.HandleFunc("/quit", func(w http.ResponseWriter, r *http.Request) {

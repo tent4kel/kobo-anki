@@ -1,41 +1,82 @@
 {{define "front"}}
+<!DOCTYPE html>
 <html>
 <head>
 <title>Anki</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 <base href="/media/{{.Deck}}/">
 <style>
+/* Old-style layout only, deliberately - the Kobo browser is old enough
+   that a modern feature doesn't degrade, it just silently drops the whole
+   declaration (calc() was tried here and produced exactly that: an
+   unconstrained image overlapping the content below it). The header/
+   content split below is a plain two-row height:100% table, not
+   position:fixed/absolute - this browser's zoom slider (a browser-chrome
+   control the page can't opt out of even with user-scalable=no, confirmed
+   by testing) desyncs position:fixed from the visual viewport, a
+   well-known old-WebKit bug. Normal-flow table rows can't desync that way.
+   Every label (here and in back.html) is centered by a table cell's own
+   valign="middle" - never by height:Npx;line-height:Npx, which only
+   centers correctly if the actual rendered font size matches what that
+   math assumed; a device text-scaling setting can inflate it independent
+   of the page's own CSS, and valign="middle" centers correctly regardless
+   of what size the text actually comes out at. */
 html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
 a { text-decoration:none; color:#000; }
 /* .card-face is the one sizing hook markdown and html/apkg cards share -
    see wrapCardFace in cmd/server/main.go. font-size/font-weight give
    markdown content (which carries no styling of its own) the same look
    the old per-template <font size="7"><b> used to; an html/apkg card's own
-   CSS below can override either for its own content. */
-.card-face { font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
+   CSS below can override either for its own content. height:100% makes it
+   a definite-height link in the chain the image's percentage max-height
+   below resolves against - percentages need every ancestor in that chain
+   to have a definite (non-auto) height, all the way up to the outer
+   table's content row below. */
+.card-face { display: block; height: 100%; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
 {{if .FrontCardCSS}}{{.FrontCardCSS}}{{end}}
 {{if .GlobalCardCSS}}{{.GlobalCardCSS}}{{end}}
+/* core.BaseCardCSS (folded into GlobalCardCSS above) already caps a raw
+   image's width to 100%; this adds the height half of "image max size is
+   50% height, 100% width" - a plain percentage, resolved against the
+   definite-height chain above, so no viewport unit or arithmetic is
+   needed at all (and, as a side effect, no CardScale compensation either
+   - a percentage is relative to its already-zoomed parent box, not the
+   true unzoomed viewport the way vh is, so it doesn't need dividing back
+   down). Scoped to .card-face so its specificity beats the bare "img"
+   rule in GlobalCardCSS for this one property. */
+.card-face img { max-width: 100%; max-height: 50%; }
 </style>
 </head>
 <body>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#eee;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td height="60" style="background-color:#eee;">
+<table width="100%" height="60" cellpadding="0" cellspacing="0" border="0">
 <tr>
 <td width="50%" height="60" align="center">
-<a href="/" style="display:block;height:60px;line-height:60px;">
+<a href="/" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
 <font size="4">[decks]</font>
+</td></tr></table>
 </a>
 </td>
 <td width="50%" height="60" align="center">
-<a href="/study?deck={{.Deck}}&reverse={{if .Reverse}}0{{else}}1{{end}}" style="display:block;height:60px;line-height:60px;">
+<a href="/study?deck={{.Deck}}&reverse={{if .Reverse}}0{{else}}1{{end}}" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
 <font size="4">{{if .Reverse}}[normal]{{else}}[reverse]{{end}}</font>
+</td></tr></table>
 </a>
 </td>
 </tr>
 </table>
-<a href="/back?front={{.Key}}&deck={{.Deck}}&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;position:absolute;top:60px;bottom:0;left:0;right:0;">
+</td>
+</tr>
+<tr>
+<td height="100%">
+<a href="/back?front={{.Key}}&deck={{.Deck}}&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;overflow-y:auto;overflow-x:hidden;">
 <table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
 <tr>
-<td align="center" valign="middle">
+<td height="100%" align="center" valign="middle">
 {{.FrontHTML}}
 <br><br><br>
 <font size="4" color="#666666">[tap to show answer]</font>
@@ -43,6 +84,9 @@ a { text-decoration:none; color:#000; }
 </tr>
 </table>
 </a>
+</td>
+</tr>
+</table>
 </body>
 </html>
 {{end}}

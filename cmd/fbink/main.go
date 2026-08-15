@@ -1173,9 +1173,11 @@ func main() {
 	dataDir = coreCfg.DataDir
 	reverseMode = coreCfg.Reverse
 	htmlFontScale = coreCfg.HTMLFontScale
+	globalCardCSSTag = core.BaseCardCSS
 	if css, err := os.ReadFile("cards.css"); err == nil {
-		globalCardCSSTag = "<style>" + string(css) + "</style>"
+		globalCardCSSTag += string(css)
 	}
+	globalCardCSSTag = "<style>" + globalCardCSSTag + "</style>"
 	sessionCfg = coreCfg.Session()
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 

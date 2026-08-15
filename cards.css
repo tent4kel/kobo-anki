@@ -8,6 +8,14 @@
  * Markdown/dict cards (core.Card.Format == "") never see this file - they
  * go through goldmark + the hand-rolled layout engine, not litehtml.
  *
+ * core.BaseCardCSS (img { max-width: 100%; height: auto; }) is always
+ * injected ahead of this file's content, so oversized source images are
+ * capped to the card automatically, the same way real Anki's own reviewer
+ * webview does it - note types generally rely on the app for that and
+ * don't set it themselves. Add a rule below at the same specificity
+ * (e.g. "img { max-width: none; }") if a particular deck needs the cap
+ * lifted.
+ *
  * Empty by default: editing this file changes every apkg-imported deck's
  * appearance at once, without re-running cmd/apkgimport. A commented-out
  * example is below.

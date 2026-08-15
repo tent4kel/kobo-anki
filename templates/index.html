@@ -1,24 +1,39 @@
 {{define "index"}}
+<!DOCTYPE html>
 <html>
 <head>
 <title>Kobo Anki</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 <style>
+/* See front.html/back.html for why this is old-style layout only: no
+   calc(), no -webkit- prefixed properties, no position:fixed/absolute.
+   This page had its own leftover instance of exactly that - a
+   calc()/-webkit-overflow-scrolling wrapper predating this session's other
+   fixes - which is the most likely explanation for why it showed the same
+   kind of overlap the card pages did, despite never being touched by any
+   of those fixes. */
 html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
 a { text-decoration:none; color:#000; }
 </style>
 </head>
 <body>
-<div style="background-color:#ddd;height:60px;">
-<a href="/quit" style="display:block;height:60px;line-height:60px;text-align:center;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td height="60" style="background-color:#ddd;">
+<a href="/quit" style="display:block;height:100%;">
+<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
 <font size="4">[exit]</font>
+</td></tr></table>
 </a>
-</div>
+</td>
+</tr>
+<tr>
+<td height="100%">
+<div style="height:100%;overflow-y:auto;overflow-x:hidden;">
 <div style="text-align:center;padding:20px 0;">
 <font size="6"><b>Kobo Anki</b></font>
 </div>
 {{if .}}
-<div style="overflow-y:auto;max-height:calc(100vh - 160px);-webkit-overflow-scrolling:touch;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0">
 {{range .}}
 <tr>
@@ -31,7 +46,6 @@ a { text-decoration:none; color:#000; }
 </tr>
 {{end}}
 </table>
-</div>
 {{else}}
 <div style="text-align:center;padding:40px;">
 <font size="4">No decks found.</font>
@@ -39,6 +53,10 @@ a { text-decoration:none; color:#000; }
 <font size="3">Add .csv files to the data directory.</font>
 </div>
 {{end}}
+</div>
+</td>
+</tr>
+</table>
 </body>
 </html>
 {{end}}
