@@ -295,3 +295,50 @@ func blockHeight(lines []layoutLine, lineHeight, blockSpace int) int {
 	}
 	return h
 }
+
+// fitCount returns how many of lines, starting from the first, drawLines
+// would actually draw into a box availH tall - the same "if y > bottom:
+// break" criterion drawLines itself uses, so a page built from this count
+// is guaranteed to render entirely within availH; no line ever lands half
+// cut at a page boundary the way the old single-page hard clip could.
+// Always at least 1 (given len(lines) > 0), so pagination can't get stuck
+// producing empty pages for a box too short for even one line.
+func fitCount(lines []layoutLine, lineHeight, blockSpace, ascent, availH int) int {
+	y := ascent
+	n := 0
+	for i, line := range lines {
+		if y > availH {
+			break
+		}
+		n++
+		y += lineHeight
+		if line.endsBlock && i < len(lines)-1 {
+			y += blockSpace
+		}
+	}
+	if n == 0 && len(lines) > 0 {
+		n = 1
+	}
+	return n
+}
+
+// paginate splits lines into successive groups, each sized by fitCount, so
+// concatenating the groups' drawn output reproduces exactly what drawLines
+// would draw unpaginated - pagination changes nothing about how content
+// looks, only how much of it a single screen shows at once.
+func paginate(lines []layoutLine, lineHeight, blockSpace, ascent, availH int) [][]layoutLine {
+	if len(lines) == 0 {
+		return [][]layoutLine{nil}
+	}
+	var pages [][]layoutLine
+	rest := lines
+	for len(rest) > 0 {
+		n := fitCount(rest, lineHeight, blockSpace, ascent, availH)
+		if n > len(rest) {
+			n = len(rest)
+		}
+		pages = append(pages, rest[:n])
+		rest = rest[n:]
+	}
+	return pages
+}

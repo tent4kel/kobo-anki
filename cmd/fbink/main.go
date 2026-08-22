@@ -95,6 +95,24 @@ func inset(r Rect, d int) Rect {
 	return Rect{r.X + d, r.Y + d, r.W - 2*d, r.H - 2*d}
 }
 
+// insetHV shrinks r by dh pixels on the left/right and dv pixels on the
+// top/bottom independently - unlike inset (one value, all four sides),
+// needed because every vertical gap in this UI is now half its matching
+// horizontal one; a single shared inset value can't express that.
+func insetHV(r Rect, dh, dv int) Rect {
+	return Rect{r.X + dh, r.Y + dv, r.W - 2*dh, r.H - 2*dv}
+}
+
+// shrinkV scales r's height by pct/100 (e.g. 80 for 20% shorter), keeping
+// it centered within r's original vertical span rather than anchored to
+// the top or bottom - used to make the rating buttons and deck-list
+// action buttons visually smaller within their existing grid cell,
+// without reflowing anything else the cell's original height fed into.
+func shrinkV(r Rect, pct int) Rect {
+	h := r.H * pct / 100
+	return Rect{r.X, r.Y + (r.H-h)/2, r.W, h}
+}
+
 // ============================================================
 // Drawing primitives
 //
@@ -963,23 +981,30 @@ func drawDecksScreen() {
 		fbinkTextRect(dueRect, dueText, FontMenu, activeStyle.SizeMenu*3/4, "GRAY8", AlignRight, true)
 	}
 
-	// Action zone: 2x2 grid — prev/next on top row, reverse/exit on bottom row
+	// Action zone: 2x2 grid — prev/next on top row, reverse/exit on bottom row.
+	// vgap is half of gap - every vertical gap in this UI (between rows,
+	// above/below elements) is half its matching horizontal one; gap
+	// itself is unchanged and still used for horizontal spacing (between
+	// side-by-side buttons, and the zone's own left/right inset).
 	gap := screenW / 30
-	actionInner := inset(actionRect, gap/2)
-	rows := splitV(actionInner, 2, gap)
+	vgap := gap / 2
+	actionInner := insetHV(actionRect, gap/2, vgap/2)
+	rows := splitV(actionInner, 2, vgap)
 	topCols := splitH(rows[0], 2, gap)
 	botCols := splitH(rows[1], 2, gap)
 
-	// Always show prev/next buttons; grayed out when not actionable
+	// Always show prev/next buttons; grayed out when not actionable. Each
+	// button is drawn 20% shorter than its grid cell, centered within it -
+	// see shrinkV.
 	if deckPage > 0 {
-		drawButton("prev", topCols[0], "< Prev", FontMenu, activeStyle.SizeMenu/2)
+		drawButton("prev", shrinkV(topCols[0], 80), "< Prev", FontMenu, activeStyle.SizeMenu/2)
 	} else {
-		drawButtonDisabled(topCols[0], "< Prev", FontMenu, activeStyle.SizeMenu/2)
+		drawButtonDisabled(shrinkV(topCols[0], 80), "< Prev", FontMenu, activeStyle.SizeMenu/2)
 	}
 	if deckPage < totalPages-1 {
-		drawButton("next", topCols[1], "Next >", FontMenu, activeStyle.SizeMenu/2)
+		drawButton("next", shrinkV(topCols[1], 80), "Next >", FontMenu, activeStyle.SizeMenu/2)
 	} else {
-		drawButtonDisabled(topCols[1], "Next >", FontMenu, activeStyle.SizeMenu/2)
+		drawButtonDisabled(shrinkV(topCols[1], 80), "Next >", FontMenu, activeStyle.SizeMenu/2)
 	}
 	// if totalPages > 1 {
 	// 	indicator := fmt.Sprintf("page %d/%d", deckPage+1, totalPages)
@@ -990,23 +1015,86 @@ func drawDecksScreen() {
 	if reverseMode {
 		reverseLabel = "Normal"
 	}
-	drawButton("reverse", botCols[0], reverseLabel, FontMenu, activeStyle.SizeMenu/2)
-	drawButton("exit", botCols[1], "Quit", FontMenu, activeStyle.SizeMenu/2)
+	drawButton("reverse", shrinkV(botCols[0], 80), reverseLabel, FontMenu, activeStyle.SizeMenu/2)
+	drawButton("exit", shrinkV(botCols[1], 80), "Quit", FontMenu, activeStyle.SizeMenu/2)
 
 	flushScreen()
 	drainTouch()
 }
 
-func drawFrontScreen() {
+// contentPage is which page of the current face's content is on screen -
+// 0 unless a "more" tap has advanced it. Reset explicitly by every call
+// site that moves to genuinely different content (a new card, or flipping
+// from front to back): drawFrontScreen/drawBackScreen take resetPage
+// rather than resetting themselves unconditionally, because the "more"
+// tap handler re-draws the *same* face on purpose, just one page further.
+// contentPageCount is that face's total page count, as of the last draw -
+// the tap dispatch switch needs it to decide "more" means advance vs wrap
+// back to page 0, without re-deriving it from scratch on every tap.
+var (
+	contentPage      int
+	contentPageCount int
+)
+
+// drawTriangle fills a small isosceles triangle inside r, apex pointing
+// down if pointDown else up. Used for the pagination indicator instead of
+// a ▼/▲ glyph: none of the four bundled fonts contain one, so drawing it
+// as text produced a missing-glyph box, not an arrow. A hand-filled shape
+// needs no font support at all.
+func drawTriangle(r Rect, pointDown bool, color string) {
+	size := r.H
+	if r.W < size {
+		size = r.W
+	}
+	if size < 2 {
+		return
+	}
+	x0 := r.X + (r.W-size)/2
+	y0 := r.Y + (r.H-size)/2
+	for row := 0; row < size; row++ {
+		frac := row
+		if !pointDown {
+			frac = size - 1 - row // flip the taper: narrow end at the top instead of the bottom
+		}
+		halfWidth := (size / 2) * (size - frac) / size
+		if halfWidth < 1 {
+			halfWidth = 1
+		}
+		cx := x0 + size/2
+		fbinkFillRect(Rect{cx - halfWidth, y0 + row, halfWidth * 2, 1}, color)
+	}
+}
+
+// drawMoreIndicator draws a small pagination bar at the bottom of r: a
+// down-pointing triangle while more content follows, an up-pointing one
+// on the last page - the way back to the top, since the "more" dispatch
+// (ScreenFront/ScreenBack) wraps contentPage back to 0 from there rather
+// than leaving a last page with no way back to page one. Shown whenever a
+// card's content didn't fit on one page, so a paginated card never looks
+// identical to one that simply ends there.
+func drawMoreIndicator(r Rect, pointDown bool) {
+	fbinkFillRect(r, "GRAYD")
+	size := r.H * 3 / 5
+	drawTriangle(Rect{r.X + (r.W-size)/2, r.Y + (r.H-size)/2, size, size}, pointDown, "")
+}
+
+func drawFrontScreen(resetPage bool) {
+	if resetPage {
+		contentPage = 0
+	}
 	activeStyle = effectiveStyle(currentDeck)
 	sceneClear()
 	// Fill screen without refresh (avoids flash between back→front)
 	fbinkFillRect(Rect{0, 0, screenW, screenH}, "WHITE")
 
-	// Back button: full width, half the height of a rating button
+	// Back button: full width, half the height of a rating button. vgap is
+	// half of gap - every vertical gap in this UI (above/below elements,
+	// between rows) is half its matching horizontal one; gap itself is
+	// unchanged and still used for horizontal spacing.
 	gap := screenW / 30
+	vgap := gap / 2
 	btnH := (actionRect.H - 2*gap) / 4 // half of a rating button row
-	backRect := Rect{gap / 2, gap / 2, screenW - gap, btnH}
+	backRect := Rect{gap / 2, vgap / 2, screenW - gap, btnH}
 	drawButton("back", backRect, "Back", FontMenu, activeStyle.SizeMenu/2)
 
 	// Card content area: whatever space actually remains between the back
@@ -1014,37 +1102,68 @@ func drawFrontScreen() {
 	// screen percentage can't account for backRect's real height or for
 	// text now rendering at its correct (larger, DPI-accurate) physical
 	// size, and previously let long content overlap the action zone.
-	availTop := backRect.Y + backRect.H + gap
+	availTop := backRect.Y + backRect.H + vgap
 	availRect := Rect{contentRect.X, availTop, contentRect.W, actionRect.Y - availTop}
 	cardRect := inset(availRect, activeStyle.Margin)
-	if currentCard != nil && core.IsHTML(*currentCard) {
-		drawHTMLLabel(cardRect, displayFront(), true)
-	} else {
-		drawMarkdownLabel(cardRect, displayFront(), FontFront, activeStyle.SizeCard, "", AlignCenter, true)
-	}
 
-	// Any tap on content or action area shows answer
-	sceneAdd("show", contentRect)
+	// Same width as the action zone (inset from actionRect by gap/2), not
+	// cardRect's own width - cardRect is additionally inset by
+	// activeStyle.Margin (a reading margin for the card's own text), a
+	// different, larger inset, so anchoring the bar to cardRect left it
+	// narrower with doubled whitespace on each side. Height matches the
+	// "Back" button above, not a rating-button-sized budget - this bar
+	// only ever needs to be as tall as a small icon. Only reserved from
+	// the content height if pagination turns out to be needed - see
+	// drawHTMLLabel/drawMarkdownLabel's own indicatorH doc comments.
+	actionInner := insetHV(actionRect, gap/2, vgap/2)
+	indicatorH := btnH
+
+	var pageCount int
+	if currentCard != nil && core.IsHTML(*currentCard) {
+		pageCount = drawHTMLLabel(cardRect, displayFront(), true, contentPage, indicatorH)
+	} else {
+		pageCount = drawMarkdownLabel(cardRect, displayFront(), FontFront, activeStyle.SizeCard, "", AlignCenter, true, contentPage, indicatorH)
+	}
+	contentPageCount = pageCount
+
+	// The action zone always shows the answer regardless of pagination -
+	// a guaranteed way to progress even mid-page-cycle, since content
+	// itself now wraps back to page 0 once fully read (see the "more"
+	// dispatch) rather than flipping to the answer on its own.
 	sceneAdd("show", actionRect)
+	if pageCount > 1 {
+		indicatorRect := Rect{actionInner.X, cardRect.Y + cardRect.H - indicatorH, actionInner.W, indicatorH}
+		drawMoreIndicator(indicatorRect, contentPage < pageCount-1)
+		sceneAdd("more", contentRect)
+	} else {
+		// Content fits on one page - a tap there also shows the answer,
+		// same as before pagination existed.
+		sceneAdd("show", contentRect)
+	}
 
 	flushScreen()
 	drainTouch()
 }
 
-func drawBackScreen() {
+func drawBackScreen(resetPage bool) {
+	if resetPage {
+		contentPage = 0
+	}
 	activeStyle = effectiveStyle(currentDeck)
 	sceneClear()
 	// Fill screen without refresh (avoids flash between front→back)
 	fbinkFillRect(Rect{0, 0, screenW, screenH}, "WHITE")
 
-	// Back button: full width, half the height of a rating button
+	// Back button: full width, half the height of a rating button. vgap is
+	// half of gap - see drawFrontScreen.
 	gap := screenW / 30
+	vgap := gap / 2
 	btnH := (actionRect.H - 2*gap) / 4
-	backRect := Rect{gap / 2, gap / 2, screenW - gap, btnH}
+	backRect := Rect{gap / 2, vgap / 2, screenW - gap, btnH}
 	drawButton("back", backRect, "Back", FontMenu, activeStyle.SizeMenu/2)
 
 	// See drawFrontScreen: real remaining space, not a static contentRect.
-	availTop := backRect.Y + backRect.H + gap
+	availTop := backRect.Y + backRect.H + vgap
 	availRect := Rect{contentRect.X, availTop, contentRect.W, actionRect.Y - availTop}
 	cardRect := inset(availRect, activeStyle.Margin)
 
@@ -1074,32 +1193,56 @@ func drawBackScreen() {
 	answerRect := cardRect
 	if !htmlCard {
 		frontRect := Rect{cardRect.X, cardRect.Y, cardRect.W, frontLineHeight * 2}
-		drawMarkdownLabel(frontRect, core.HeadwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true)
+		drawMarkdownLabel(frontRect, core.HeadwordOnly(displayFront()), FontFront, activeStyle.SizeMenu, "GRAY8", AlignCenter, true, 0, 0)
 
 		// Answer text — this rect is itself fixed (anchored right below the
 		// fixed frontRect), so centering within it can't cause any jumping;
 		// only the answer's own content shifts its centering, never the front
 		// label's position.
-		answerTop := frontRect.Y + frontRect.H + gap
+		answerTop := frontRect.Y + frontRect.H + vgap
 		answerRect = Rect{cardRect.X, answerTop, cardRect.W, cardRect.Y + cardRect.H - answerTop}
 	}
 
+	// Same width as the actual rating button row, not answerRect's own
+	// (more inset) width - see drawFrontScreen. Top/bottom insets use
+	// vgap/2, half of the gap/2 left/right keep - button width and the
+	// zone's bottom-of-screen spacing stay unchanged, only the vertical
+	// whitespace around the bar and button rows shrinks.
+	actionInner := insetHV(actionRect, gap/2, vgap/2)
+	// Same height as the "Back" button at the top of the screen, not the
+	// rating button row - a bar this small doesn't need a button-sized
+	// budget, and every pixel not reserved for it is a pixel the content
+	// above gets instead (only reserved at all if pagination needs it).
+	indicatorH := btnH
+
+	var pageCount int
 	if htmlCard {
-		drawHTMLLabel(answerRect, displayBack(), true)
+		pageCount = drawHTMLLabel(answerRect, displayBack(), true, contentPage, indicatorH)
 	} else {
-		drawMarkdownLabel(answerRect, displayBack(), FontBack, activeStyle.SizeCard, "", AlignCenter, true)
+		pageCount = drawMarkdownLabel(answerRect, displayBack(), FontBack, activeStyle.SizeCard, "", AlignCenter, true, contentPage, indicatorH)
+	}
+	contentPageCount = pageCount
+
+	if pageCount > 1 {
+		indicatorRect := Rect{actionInner.X, answerRect.Y + answerRect.H - indicatorH, actionInner.W, indicatorH}
+		drawMoreIndicator(indicatorRect, contentPage < pageCount-1)
+		// Rating buttons stay tappable regardless - rating doesn't require
+		// having paged through every page of the answer first, same as
+		// real Anki doesn't require scrolling to the bottom of a long card.
+		sceneAdd("more", answerRect)
 	}
 
-	// Rating buttons: 2x2 grid in action zone
-	actionInner := inset(actionRect, gap/2)
-	rows := splitV(actionInner, 2, gap)
+	// Rating buttons: 2x2 grid in action zone, each button drawn 20%
+	// shorter than its grid cell and centered within it. vgap between the
+	// two rows, gap (unchanged) between the two buttons in a row.
+	rows := splitV(actionInner, 2, vgap)
 	topCols := splitH(rows[0], 2, gap)
 	botCols := splitH(rows[1], 2, gap)
 
-	drawButton("hard", topCols[0], "Hard", FontMenu, activeStyle.SizeMenu/2)
-	drawButton("good", topCols[1], "Good", FontMenu, activeStyle.SizeMenu/2)
-	drawButton("again", botCols[0], "Again", FontMenu, activeStyle.SizeMenu/2)
-	drawButton("easy", botCols[1], "Easy", FontMenu, activeStyle.SizeMenu/2)
+	drawButton("hard", shrinkV(topCols[0], 80), "Hard", FontMenu, activeStyle.SizeMenu/2)
+	drawButton("good", shrinkV(topCols[1], 80), "Good", FontMenu, activeStyle.SizeMenu/2)
+	drawButton("again", shrinkV(botCols[0], 80), "Again", FontMenu, activeStyle.SizeMenu/2)
+	drawButton("easy", shrinkV(botCols[1], 80), "Easy", FontMenu, activeStyle.SizeMenu/2)
 
 	flushScreen()
 	drainTouch()
@@ -1110,10 +1253,12 @@ func drawDoneScreen() {
 	sceneClear()
 	canvas.Clear(0xFF)
 
-	// Back button: full width, half the height of a rating button
+	// Back button: full width, half the height of a rating button. vgap is
+	// half of gap - see drawFrontScreen.
 	gap := screenW / 30
+	vgap := gap / 2
 	btnH := (actionRect.H - 2*gap) / 4
-	backRect := Rect{gap / 2, gap / 2, screenW - gap, btnH}
+	backRect := Rect{gap / 2, vgap / 2, screenW - gap, btnH}
 	drawButton("back", backRect, "Back", FontMenu, activeStyle.SizeMenu/2)
 
 	// "Done!" centered
@@ -1141,7 +1286,7 @@ func drawDoneScreen() {
 		// (drawBackScreen), so it lands where Again/Easy do rather than a row
 		// higher. Built with the shared helpers so it stays aligned if the
 		// action zone ever moves.
-		rows := splitV(inset(actionRect, gap/2), 2, gap)
+		rows := splitV(insetHV(actionRect, gap/2, vgap/2), 2, vgap)
 		drawButton("ahead", rows[1], fmt.Sprintf("Study ahead (%d)", n), FontMenu, activeStyle.SizeMenu/2)
 	}
 
@@ -1161,7 +1306,7 @@ func rateAndAdvance(rating fsrs.Rating) Screen {
 		drawDoneScreen()
 		return ScreenDone
 	}
-	drawFrontScreen()
+	drawFrontScreen(true)
 	return ScreenFront
 }
 
@@ -1244,7 +1389,7 @@ func main() {
 						drawDoneScreen()
 					} else {
 						screen = ScreenFront
-						drawFrontScreen()
+						drawFrontScreen(true)
 					}
 				}
 			}
@@ -1253,9 +1398,21 @@ func main() {
 			if id == "back" {
 				screen = ScreenDecks
 				drawDecksScreen()
+			} else if id == "more" {
+				// Wrap back to page 0 from the last page rather than
+				// leaving no way to re-read from the top - the action
+				// zone (registered separately, see drawFrontScreen) is
+				// always available to actually flip to the answer, so
+				// wrapping here costs nothing but a way back up.
+				if contentPage < contentPageCount-1 {
+					contentPage++
+				} else {
+					contentPage = 0
+				}
+				drawFrontScreen(false)
 			} else if id == "show" {
 				screen = ScreenBack
-				drawBackScreen()
+				drawBackScreen(true)
 			}
 
 		case ScreenBack:
@@ -1263,6 +1420,13 @@ func main() {
 			case "back":
 				screen = ScreenDecks
 				drawDecksScreen()
+			case "more":
+				if contentPage < contentPageCount-1 {
+					contentPage++
+				} else {
+					contentPage = 0
+				}
+				drawBackScreen(false)
 			case "again":
 				screen = rateAndAdvance(fsrs.Again)
 			case "hard":
@@ -1280,7 +1444,7 @@ func main() {
 				currentCard = session.Current(cards)
 				if currentCard != nil {
 					screen = ScreenFront
-					drawFrontScreen()
+					drawFrontScreen(true)
 				}
 			case id != "":
 				screen = ScreenDecks

@@ -24,7 +24,21 @@ import (
 // core.HeadwordOnlyHTML, the container's own small default size - no
 // wrapping <style> means no explicit font-size, so it renders smaller than a
 // full card face without needing one threaded through here).
-func drawHTMLLabel(r Rect, html string, centerV bool) {
+//
+// page/pageCount mirror drawMarkdownLabel: litehtml already lays the whole
+// card out to its natural height before this ever crops anything, so
+// pagination here is just slicing that one raster into bands instead of
+// discarding everything past the first one. centerV only applies when the
+// content fits on a single page, for the same reason drawMarkdownLabel
+// disables it once paginated - centering would make the content jump
+// vertically page to page instead of reading as one continuous document.
+//
+// indicatorH is the height a "more"/"back to top" bar would need if this
+// content turns out to need more than one page - reserved from r only
+// when it actually does (checked against the unreserved r.H first), so a
+// card that already fits doesn't lose any of its height to a bar it will
+// never draw.
+func drawHTMLLabel(r Rect, html string, centerV bool, page int, indicatorH int) (pageCount int) {
 	// screenDPI is the real, detected panel density (see detectScreen);
 	// real Anki card CSS assumes a normal ~96-160 DPI phone/desktop screen,
 	// so litehtml's literal font-size:20px needs inflating by roughly
@@ -49,12 +63,15 @@ func drawHTMLLabel(r Rect, html string, centerV bool) {
 	// *width* to the card; it can't also cap height there, because that
 	// needs a concrete pixel budget only known here, per call, from r.H (a
 	// front face and a back face - which reserves space for the rating
-	// buttons - have different budgets). Injected last, after
-	// globalCardCSSTag, so it wins the cascade for this one property
-	// without touching max-width/height:auto already set there - the
-	// browser/litehtml replaced-element sizing algorithm applies both
-	// constraints together, same as object-fit:contain would.
-	maxImgHeight := int(float32(r.H) / scale)
+	// buttons - have different budgets). 70%, not 100%: a single image
+	// filling the entire available height left no room for any
+	// accompanying text on the same page, forcing a page turn even for a
+	// card that would otherwise fit; width stays uncapped by this rule
+	// (core.BaseCardCSS's max-width:100% already covers it) and aspect
+	// ratio is preserved automatically - only max-height is set here,
+	// height:auto already came from core.BaseCardCSS. Injected last, after
+	// globalCardCSSTag, so it wins the cascade for this one property.
+	maxImgHeight := int(float32(r.H) * 0.7 / scale)
 	if maxImgHeight < 1 {
 		maxImgHeight = 1
 	}
@@ -64,27 +81,62 @@ func drawHTMLLabel(r Rect, html string, centerV bool) {
 		if debug {
 			fmt.Printf("drawHTMLLabel: %v\n", err)
 		}
-		return
+		return 1
 	}
 
-	target := r
-	if centerV {
-		target = centerRectV(r, rendered.Bounds().Dy())
+	// Only reserve indicatorH if the content actually needs more than one
+	// page at the full r.H - see the doc comment above.
+	total := rendered.Bounds().Dy()
+	availH := r.H
+	if total > availH {
+		availH -= indicatorH
 	}
-	dst := image.Rect(target.X, target.Y, target.X+rendered.Bounds().Dx(), target.Y+rendered.Bounds().Dy())
+	if availH < 1 {
+		availH = 1
+	}
+	pageCount = (total + availH - 1) / availH
+	if pageCount < 1 {
+		pageCount = 1
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= pageCount {
+		page = pageCount - 1
+	}
+	sliceTop := page * availH
+	sliceBottom := sliceTop + availH
+	if sliceBottom > total {
+		sliceBottom = total
+	}
+	// SubImage shares the underlying pixels and keeps rendered's own
+	// coordinate space (its Bounds().Min is (0, sliceTop), not (0, 0)) -
+	// the sp passed to draw.Draw below has to account for that, not just
+	// for target/bound clipping.
+	sliceRect := image.Rect(0, sliceTop, rendered.Bounds().Dx(), sliceBottom)
+	slice := rendered.SubImage(sliceRect).(*image.RGBA)
+
+	target := r
+	if pageCount == 1 && centerV {
+		target = centerRectV(r, sliceRect.Dy())
+	}
+	dst := image.Rect(target.X, target.Y, target.X+sliceRect.Dx(), target.Y+sliceRect.Dy())
 	// Clip to r: draw.Draw only clips against the canvas's own bounds (the
-	// whole screen), not against this label's allotted rect - without this,
-	// content still too tall after the max-height cap above (long text, or
-	// a max-height edge case) would spill into whatever's drawn below, e.g.
-	// the rating buttons on the back screen, instead of being cleanly
-	// cropped at the card's own boundary.
+	// whole screen), not against this label's allotted rect. Pagination
+	// already keeps each slice within availH, so this is now a pure safety
+	// net for rounding rather than the primary overflow answer it used to
+	// be - but cheap to keep regardless.
 	bound := image.Rect(r.X, r.Y, r.X+r.W, r.Y+r.H)
 	clipped := dst.Intersect(bound)
 	if clipped.Empty() {
-		return
+		return pageCount
 	}
-	sp := image.Point{X: clipped.Min.X - dst.Min.X, Y: clipped.Min.Y - dst.Min.Y}
-	draw.Draw(canvas.Img, clipped, rendered, sp, draw.Over)
+	sp := image.Point{
+		X: sliceRect.Min.X + (clipped.Min.X - dst.Min.X),
+		Y: sliceRect.Min.Y + (clipped.Min.Y - dst.Min.Y),
+	}
+	draw.Draw(canvas.Img, clipped, slice, sp, draw.Over)
+	return pageCount
 }
 
 // styleCache holds deck stylesheets already read this run, keyed by

@@ -168,6 +168,14 @@ func (b wrappedBlock) height() int {
 	return blockHeight(b.lines, b.lineHeight, b.blockSpace)
 }
 
+// pages splits the block into successive availH-tall pages via paginate -
+// see there for why a page boundary never lands mid-line. A block that
+// fits without splitting still returns a single-element slice, so callers
+// don't need a separate "did it paginate" branch.
+func (b wrappedBlock) pages(availH int) [][]layoutLine {
+	return paginate(b.lines, b.lineHeight, b.blockSpace, b.ascent, availH)
+}
+
 // wrapMarkdown parses and word-wraps Markdown text for the given
 // font/size within maxWidth, without drawing anything yet.
 func wrapMarkdown(md string, ft FontType, size, maxWidth int) (wrappedBlock, error) {
@@ -204,18 +212,49 @@ func (b wrappedBlock) draw(r Rect, gray uint8, align Align, centerV bool) {
 // drawMarkdownLabel wraps and draws Markdown-formatted card content
 // (bold/italic/lists/line breaks) in one call - the common case of a
 // single independent block. If centerV, it's vertically centered within r
-// using its real post-wrap height. Used at the card-content call sites in
-// drawFrontScreen and (for the combined front+answer centering)
-// indirectly via wrapMarkdown/wrappedBlock in drawBackScreen. Every other
-// label (buttons, deck names, "Done!" messages) never carries card content
-// and stays on the plain fbinkTextRect path.
-func drawMarkdownLabel(r Rect, md string, ft FontType, size int, color string, align Align, centerV bool) {
+// using its real post-wrap height - but only when the content fits on one
+// page (page 0 of a single-page result); a card spread across pages stays
+// top-aligned on every page, so content doesn't visually jump up and down
+// as pageCount changes what "centered" would mean. page selects which
+// availH-tall slice to draw (0-based, clamped into range); the return
+// value is the total page count, so a caller can tell whether more
+// content exists beyond what's shown and needs a "more" affordance -
+// callers that never paginate (e.g. the small fixed-height headword
+// reminder label) can simply pass page 0, 0 for indicatorH, and ignore the
+// return value. Used at the card content call sites in
+// drawFrontScreen/drawBackScreen; every other label (buttons, deck names,
+// "Done!" messages) never carries card content and stays on the plain
+// fbinkTextRect path.
+//
+// indicatorH is the height a "more"/"back to top" bar would need if this
+// content turns out to need more than one page - reserved from r only
+// when it actually does (checked against the unreserved r.H first, via
+// b.height()), so a card that already fits doesn't lose any of its height
+// to a bar it will never draw.
+func drawMarkdownLabel(r Rect, md string, ft FontType, size int, color string, align Align, centerV bool, page int, indicatorH int) (pageCount int) {
 	b, err := wrapMarkdown(md, ft, size, r.W)
 	if err != nil {
 		if debug {
 			fmt.Printf("drawMarkdownLabel: %v\n", err)
 		}
-		return
+		return 1
 	}
-	b.draw(r, colorToGray(color), align, centerV)
+	availH := r.H
+	if b.height() > availH {
+		availH -= indicatorH
+	}
+	if availH < 1 {
+		availH = 1
+	}
+	pages := b.pages(availH)
+	if page < 0 {
+		page = 0
+	}
+	if page >= len(pages) {
+		page = len(pages) - 1
+	}
+	pageBlock := wrappedBlock{lines: pages[page], lineHeight: b.lineHeight, ascent: b.ascent, blockSpace: b.blockSpace, resolve: b.resolve}
+	drawRect := Rect{r.X, r.Y, r.W, availH}
+	pageBlock.draw(drawRect, colorToGray(color), align, centerV && len(pages) == 1)
+	return len(pages)
 }
