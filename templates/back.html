@@ -6,96 +6,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 <base href="/media/{{.Deck}}/">
 <style>
-/* See front.html - old-style layout only, deliberately: calc() silently
-   dropped the whole max-height declaration, and this browser's zoom
-   slider desyncs position:fixed from the visual viewport (a browser-chrome
-   control, confirmed not fixable via user-scalable=no). The header/
-   content/rating-buttons split below is a plain three-row height:100%
-   table instead, immune to that desync since it never leaves flow. Every
-   label is centered by a table cell's own valign="middle", never by
-   height:Npx;line-height:Npx - see front.html for why that matters here. */
-html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
+/* Layout tested empirically against the Kobo webview (2026-08): nested
+   overflow:auto containers (table-cell or div with a constrained height)
+   did NOT scroll reliably in this browser - drag never worked, and
+   programmatic scrollTop was flaky even where the page rendered fine.
+   What DID work: the plain, whole-document scroll with header/footer as
+   position:fixed overlays and body padding to keep content clear of
+   them. That's what this template uses now. If this browser's zoom
+   slider turns out to desync position:fixed from the visual viewport,
+   that has NOT been reproduced in our testing so far - re-verify on
+   device before reverting this, don't take that claim on faith. */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+html, body { margin:0; padding:0; background-color:#fff; color:#000; }
+body {
+  padding-top: 60px;   /* = header height below */
+  padding-bottom: 120px; /* = footer height below */
+}
 a { text-decoration:none; color:#000; }
+
+header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 60px;
+  background-color: #eee;
+}
+header a {
+  display: table;
+  width: 100%;
+  height: 100%;
+}
+header a span {
+  display: table-cell;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 18px;
+}
+
+#content {
+  padding: 12px;
+}
+
+footer {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 120px;
+  display: table;
+  table-layout: fixed;
+  width: 100%;
+}
+footer a {
+  display: table-cell;
+  width: 25%;
+  height: 120px;
+  text-align: center;
+  vertical-align: middle;
+}
+footer a span { font-size: 18px; font-weight: bold; }
+footer a.again { background-color: #ddd; }
+footer a.hard  { background-color: #ccc; }
+footer a.good  { background-color: #bbb; }
+footer a.easy  { background-color: #aaa; }
+
 /* .card-face is the one sizing hook markdown and html/apkg cards share -
    see wrapCardFace in cmd/server/main.go. font-size/font-weight give
    markdown content (which carries no styling of its own) the same look
    the old per-template <font size="7"><b> used to; an html/apkg card's own
-   CSS below can override either for its own content. height:100% keeps
-   this a definite-height link in the chain the image's percentage
-   max-height below resolves against - see front.html. */
-.card-face { display: block; height: 100%; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
+   CSS below can override either for its own content. */
+.card-face { display: block; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
 {{if .BackCardCSS}}{{.BackCardCSS}}{{end}}
 {{if .GlobalCardCSS}}{{.GlobalCardCSS}}{{end}}
-/* See front.html: a plain percentage, no viewport unit or CardScale
-   division needed. "Image max size is 50% height, 100% width." */
 .card-face img { max-width: 100%; max-height: 50%; }
 </style>
 </head>
 <body>
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td height="60" style="background-color:#eee;">
-<a href="/" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="4">[decks]</font>
-</td></tr></table>
-</a>
-</td>
-</tr>
-<tr>
-<td height="100%">
-<div style="height:100%;overflow-y:auto;overflow-x:hidden;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td height="100%" align="center" valign="middle">
+
+<header>
+<a href="/"><span>[decks]</span></a>
+</header>
+
+<div id="content">
 {{if not .IsHTML}}
 <font size="5" color="#666666">{{.FrontHeadwordHTML}}</font>
 <br><br>
 {{end}}
 {{.BackHTML}}
-</td>
-</tr>
-</table>
 </div>
-</td>
-</tr>
-<tr>
-<td height="120">
-<table width="100%" height="120" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td width="25%" height="120" align="center" style="background-color:#ddd;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=1&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="5"><b>Again</b></font>
-</td></tr></table>
-</a>
-</td>
-<td width="25%" height="120" align="center" style="background-color:#ccc;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=2&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="5"><b>Hard</b></font>
-</td></tr></table>
-</a>
-</td>
-<td width="25%" height="120" align="center" style="background-color:#bbb;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=3&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="5"><b>Good</b></font>
-</td></tr></table>
-</a>
-</td>
-<td width="25%" height="120" align="center" style="background-color:#aaa;">
-<a href="/rate?front={{.Key}}&deck={{.Deck}}&q=4&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="5"><b>Easy</b></font>
-</td></tr></table>
-</a>
-</td>
-</tr>
-</table>
-</td>
-</tr>
-</table>
+
+<footer>
+<a class="again" href="/rate?front={{.Key}}&deck={{.Deck}}&q=1&reverse={{if .Reverse}}1{{else}}0{{end}}"><span>Again</span></a>
+<a class="hard"  href="/rate?front={{.Key}}&deck={{.Deck}}&q=2&reverse={{if .Reverse}}1{{else}}0{{end}}"><span>Hard</span></a>
+<a class="good"  href="/rate?front={{.Key}}&deck={{.Deck}}&q=3&reverse={{if .Reverse}}1{{else}}0{{end}}"><span>Good</span></a>
+<a class="easy"  href="/rate?front={{.Key}}&deck={{.Deck}}&q=4&reverse={{if .Reverse}}1{{else}}0{{end}}"><span>Easy</span></a>
+</footer>
+
+<script>
+// Tap anywhere on the page to page down by one screenful. Whole-document
+// scroll (see layout comment above) - not a scrollTop increment on a
+// nested container, since that's the part that didn't work reliably.
+// header/footer heights read at runtime rather than hardcoded, so this
+// doesn't silently break if the CSS heights above ever change.
+//
+// The listener is on document, not #content: #content's box is only as
+// tall as the card, so a short card leaves blank space between it and the
+// fixed footer that a #content-only listener would never see taps in. A
+// document-level listener catches the whole viewport; header/footer
+// clicks are explicitly excluded so their own links keep working
+// untouched.
+(function () {
+	var content = document.getElementById('content');
+	var header = document.querySelector('header');
+	var footer = document.querySelector('footer');
+	if (!content || !header || !footer) { return; }
+
+	// A spacer below the real content, sized generously to one viewport
+	// height, so the browser's own native scroll limit never clips the
+	// final tap short: without it, a card whose remaining content is
+	// shorter than one screenful gets clamped, and the last jump ends up
+	// smaller than every other one. Added once and left alone - its own
+	// exact size doesn't matter (it only needs to be at least one
+	// screenful), so it doesn't need to track images still loading.
+	var spacer = document.createElement('div');
+	spacer.style.height = window.innerHeight + 'px';
+	document.body.appendChild(spacer);
+
+	document.addEventListener('click', function (e) {
+		if (header.contains(e.target) || footer.contains(e.target)) { return; } // own links
+
+		var headerHeight = header.getBoundingClientRect().height;
+		var footerHeight = footer.getBoundingClientRect().height;
+		var visibleHeight = window.innerHeight - headerHeight - footerHeight;
+
+		// Measured fresh off #content itself (not document.scrollHeight,
+		// which now includes the spacer) so a still-loading image that
+		// grows the card after the page first rendered is picked up
+		// correctly, instead of freezing a stale value at load time.
+		var scrollY = window.pageYOffset || document.documentElement.scrollTop;
+		var contentBottom = content.getBoundingClientRect().bottom + scrollY;
+		var realMaxScroll = contentBottom + footerHeight - window.innerHeight;
+		if (realMaxScroll <= 0) { return; } // nothing to scroll
+
+		if (scrollY >= realMaxScroll - 1) {
+			// Already showing the last page: no-op, stay put (rating
+			// buttons are the way forward from here, not another tap).
+			return;
+		}
+		window.scrollTo(0, scrollY + visibleHeight);
+	}, false);
+})();
+</script>
+
 </body>
 </html>
 {{end}}

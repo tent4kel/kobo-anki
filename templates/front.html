@@ -6,87 +6,115 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
 <base href="/media/{{.Deck}}/">
 <style>
-/* Old-style layout only, deliberately - the Kobo browser is old enough
-   that a modern feature doesn't degrade, it just silently drops the whole
-   declaration (calc() was tried here and produced exactly that: an
-   unconstrained image overlapping the content below it). The header/
-   content split below is a plain two-row height:100% table, not
-   position:fixed/absolute - this browser's zoom slider (a browser-chrome
-   control the page can't opt out of even with user-scalable=no, confirmed
-   by testing) desyncs position:fixed from the visual viewport, a
-   well-known old-WebKit bug. Normal-flow table rows can't desync that way.
-   Every label (here and in back.html) is centered by a table cell's own
-   valign="middle" - never by height:Npx;line-height:Npx, which only
-   centers correctly if the actual rendered font size matches what that
-   math assumed; a device text-scaling setting can inflate it independent
-   of the page's own CSS, and valign="middle" centers correctly regardless
-   of what size the text actually comes out at. */
-html, body { margin:0; padding:0; height:100%; background-color:#fff; color:#000; }
+/* See back.html for why this is plain whole-document scroll with the
+   header as a position:fixed overlay, rather than a nested overflow:auto
+   container. */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+html, body { margin:0; padding:0; background-color:#fff; color:#000; }
+body {
+  padding-top: 60px; /* = header height below */
+}
 a { text-decoration:none; color:#000; }
+
+header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 60px;
+  background-color: #eee;
+  display: table;
+  table-layout: fixed;
+  width: 100%;
+}
+header a {
+  display: table-cell;
+  width: 50%;
+  height: 60px;
+  text-align: center;
+  vertical-align: middle;
+}
+header a span { font-size: 18px; }
+
+#content {
+  padding: 12px;
+}
+
 /* .card-face is the one sizing hook markdown and html/apkg cards share -
    see wrapCardFace in cmd/server/main.go. font-size/font-weight give
    markdown content (which carries no styling of its own) the same look
    the old per-template <font size="7"><b> used to; an html/apkg card's own
-   CSS below can override either for its own content. height:100% makes it
-   a definite-height link in the chain the image's percentage max-height
-   below resolves against - percentages need every ancestor in that chain
-   to have a definite (non-auto) height, all the way up to the outer
-   table's content row below. */
-.card-face { display: block; height: 100%; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
+   CSS below can override either for its own content. */
+.card-face { display: block; font-size: 16px; font-weight: bold; zoom: {{.CardScale}}; }
 {{if .FrontCardCSS}}{{.FrontCardCSS}}{{end}}
 {{if .GlobalCardCSS}}{{.GlobalCardCSS}}{{end}}
-/* core.BaseCardCSS (folded into GlobalCardCSS above) already caps a raw
-   image's width to 100%; this adds the height half of "image max size is
-   50% height, 100% width" - a plain percentage, resolved against the
-   definite-height chain above, so no viewport unit or arithmetic is
-   needed at all (and, as a side effect, no CardScale compensation either
-   - a percentage is relative to its already-zoomed parent box, not the
-   true unzoomed viewport the way vh is, so it doesn't need dividing back
-   down). Scoped to .card-face so its specificity beats the bare "img"
-   rule in GlobalCardCSS for this one property. */
 .card-face img { max-width: 100%; max-height: 50%; }
 </style>
 </head>
 <body>
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td height="60" style="background-color:#eee;">
-<table width="100%" height="60" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td width="50%" height="60" align="center">
-<a href="/" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="4">[decks]</font>
-</td></tr></table>
-</a>
-</td>
-<td width="50%" height="60" align="center">
-<a href="/study?deck={{.Deck}}&reverse={{if .Reverse}}0{{else}}1{{end}}" style="display:block;height:100%;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle">
-<font size="4">{{if .Reverse}}[normal]{{else}}[reverse]{{end}}</font>
-</td></tr></table>
-</a>
-</td>
-</tr>
-</table>
-</td>
-</tr>
-<tr>
-<td height="100%">
-<a href="/back?front={{.Key}}&deck={{.Deck}}&reverse={{if .Reverse}}1{{else}}0{{end}}" style="display:block;height:100%;overflow-y:auto;overflow-x:hidden;">
-<table width="100%" height="100%" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td height="100%" align="center" valign="middle">
+
+<header>
+<a href="/"><span>[decks]</span></a>
+<a href="/study?deck={{.Deck}}&reverse={{if .Reverse}}0{{else}}1{{end}}"><span>{{if .Reverse}}[normal]{{else}}[reverse]{{end}}</span></a>
+</header>
+
+<div id="content">
 {{.FrontHTML}}
 <br><br><br>
 <font size="4" color="#666666">[tap to show answer]</font>
-</td>
-</tr>
-</table>
-</a>
-</td>
-</tr>
-</table>
+</div>
+
+<script>
+// #content is a plain div, not a link - wrapping block-level card content
+// (font/br/images) in an <a> made this browser split it into multiple,
+// independently-clickable regions instead of one, so tap-to-scroll and
+// tap-to-reveal ended up colliding. Navigation is done by hand instead,
+// from the same click handler that does the paging, exactly like
+// back.html's tap-to-scroll - just with a location.href instead of a
+// no-op once there's nothing left to page through.
+//
+// The listener is on document, not #content: #content's box is only as
+// tall as the card, so a short card leaves blank space below it (down to
+// the header) that a #content-only listener would never see taps in. A
+// document-level listener catches the whole viewport; header clicks are
+// explicitly excluded so its own links keep working untouched.
+(function () {
+	var content = document.getElementById('content');
+	var header = document.querySelector('header');
+	if (!content || !header) { return; }
+
+	var backHref = "/back?front={{.Key}}&deck={{.Deck}}&reverse={{if .Reverse}}1{{else}}0{{end}}";
+
+	// See back.html for why this spacer exists: it just needs to be at
+	// least one screenful so the browser's own native scroll limit never
+	// clips the final tap short.
+	var spacer = document.createElement('div');
+	spacer.style.height = window.innerHeight + 'px';
+	document.body.appendChild(spacer);
+
+	document.addEventListener('click', function (e) {
+		if (header.contains(e.target)) { return; } // header has its own links
+
+		var headerHeight = header.getBoundingClientRect().height;
+		var visibleHeight = window.innerHeight - headerHeight;
+
+		// Measured fresh off #content itself (not document.scrollHeight,
+		// which now includes the spacer) so a still-loading image that
+		// grows the card after the page first rendered is picked up
+		// correctly, instead of freezing a stale value at load time.
+		var scrollY = window.pageYOffset || document.documentElement.scrollTop;
+		var contentBottom = content.getBoundingClientRect().bottom + scrollY;
+		var realMaxScroll = contentBottom - window.innerHeight;
+
+		if (realMaxScroll <= 0 || scrollY >= realMaxScroll - 1) {
+			// Nothing left to page through: show the answer.
+			window.location.href = backHref;
+			return;
+		}
+		window.scrollTo(0, scrollY + visibleHeight);
+	}, false);
+})();
+</script>
+
 </body>
 </html>
 {{end}}
