@@ -1,23 +1,29 @@
 # Kobo Anki
 
+> **Disclaimer:** This project is vibecoded — built almost entirely with AI coding
+> assistance — and has only been tested at small scale, on one device and one user's
+> workflow. Expect rough edges; review the code before trusting it with your data.
+
 Spaced repetition flashcards on Kobo e-readers. Renders directly to the e-ink display using [FBInk](https://github.com/NiLuJe/FBInk) — no WiFi or browser needed.
 
-Includes **kobo-vocab**, a vocabulary extractor that pulls words you looked up on your Kobo and turns them into flashcard decks using offline dictionaries.
-
 ## How it works
+1. Includes multiple ways to create and import flashcards:
+-  **kobo-vocab** reads your Kobo's vocabulary database (`KoboReader.sqlite`), looks up each word in bundled dictionaries, and exports flashcard CSVs
+-  **kobo-anki-apkgimport** tool to import anki decks and convert them to CSV, supporst html, images, cloze cards
+-  **place your own CSV files** simple two comma seperated tables with fromt and back, Markdown supported
 
-1. **kobo-vocab** reads your Kobo's vocabulary database (`KoboReader.sqlite`), looks up each word in bundled dictionaries, and exports flashcard CSVs
-2. **kobo-anki-fbink** renders a touch-driven flashcard UI directly on the e-ink screen
-3. Cards are scheduled using the [FSRS](https://github.com/open-spaced-repetition/go-fsrs) spaced repetition algorithm
+2. Cards are scheduled using the [FSRS](https://github.com/open-spaced-repetition/go-fsrs) spaced repetition algorithm
 
-There is also a **kobo-anki-server** web UI that serves flashcards via a local HTTP server for use in the Kobo browser — useful but requires WiFi.
+
+3. **GUI** two interfaces:
+- **kobo-anki-fbink** renders a touch-driven flashcard UI directly on the device.
+- There is also a **kobo-anki-server** web UI that serves flashcards via a local HTTP server for use in the Kobo browser — useful but requires WiFi.
 
 ## Requirements
 
 - A Kobo e-reader (tested on Clara BW)
 - [NickelMenu](https://pgaskin.net/NickelMenu/) for launching
-- [FBInk](https://github.com/NiLuJe/FBInk) binary for your device (GPL-3.0)
-- SSH access for initial setup
+- (now included)  [FBInk](https://github.com/NiLuJe/FBInk) binary for your device (GPL-3.0)
 
 ## Building from source
 
@@ -34,8 +40,7 @@ This cross-compiles three ARM binaries into `bin/`:
 - `kobo-anki-server` — web flashcard UI
 - `kobo-vocab` — vocabulary extractor
 
-You also need the `fbink` binary. Download the Kobo build from [FBInk releases](https://github.com/NiLuJe/FBInk/releases) and place it in `bin/`.
-
+You also need the `fbink` binary, a static build is included.
 ## Installation
 
 First copy the `.example` config files and rename them (remove `.example`), then edit to match
@@ -71,31 +76,6 @@ Add to `/mnt/onboard/.adds/nm/config`:
 ```
 menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
 ```
-
-### Deploying over FTP (for development)
-
-Unplugging and replugging USB for every change gets old fast. `deploy-ftp.sh` rebuilds the ARM
-binaries and pushes them over plain FTP instead — all the stock Kobo FTP server supports — so
-you can iterate without touching the cable. Put the connection details in `deploy.conf` (see
-`deploy.conf.example`, gitignored):
-
-```sh
-KOBO_HOST=192.168.1.50
-KOBO_PORT=1021
-KOBO_USER=root
-KOBO_FOLDER=kobo-anki-beta
-```
-
-```sh
-./deploy-ftp.sh                    # uses deploy.conf
-./deploy-ftp.sh 192.168.1.50       # or pass the host directly
-```
-
-It never touches `words/` (your review progress) or on-device logs, so it's safe to re-run as
-often as you like. Note it uploads into `.adds/<KOBO_FOLDER>/kobo-anki/` — a level deeper than
-the USB layout above — so a `KOBO_FOLDER` like `kobo-anki-beta` gives you a test install
-sitting alongside your real one, with its own NickelMenu entry pointing at
-`/mnt/onboard/.adds/kobo-anki-beta/kobo-anki/start.sh`.
 
 ## Configuration
 
@@ -294,7 +274,8 @@ the wrong window — and a month is too long a window to be wrong about. Instead
 `APIs/pons.state.json` so the standdown survives between runs. Worst case after a rollover is
 one wasted call per day. Delete that file to retry immediately.
 
-The card layout itself (`[**{head}**][, {alts}][ *{ex}*]` by default) is controlled by
+The card layout itself (`[**{head}**][\n\n{alts}][\n\n*{ex}*]` by default - each bracketed
+chunk its own Markdown paragraph, not an inline comma/space join) is controlled by
 `card_format` - one shared template across `dict` (with `dict_examples=true`), `pons`,
 `lexicala`, and `chatgpt`, so restyling it applies everywhere at once. `{head}`/`{alts}`/`{ex}` are the
 placeholders; wrapping a chunk in `[...]` drops it entirely, not just blank, when every
@@ -304,9 +285,9 @@ placeholder inside is empty - see the comment above `card_format` in
 `pons`/`lexicala`/`chatgpt` all need working HTTPS, which some Kobo firmware can't do out
 of the box - certain devices ship with no system CA store at all, so every TLS request fails
 with `x509: certificate signed by unknown authority` regardless of provider. `cacert.pem`
-(repo root, deployed automatically by `deploy-ftp.sh`) is a standard CA bundle appended to
-whatever trust store the OS provides, fixing that - see `ca_cert` in
-`anki-mywords.conf.example`.
+(repo root — copy it to the device alongside the other files listed under
+[Installation](#installation)) is a standard CA bundle appended to whatever trust store the
+OS provides, fixing that - see `ca_cert` in `anki-mywords.conf.example`.
 
 **Benchmark.** A 15-word nl→de run (10 everyday words + 5 deliberately obscure ones) against
 the live APIs, each provider queried independently:
@@ -541,18 +522,14 @@ open with Numbers/LibreOffice, which honor the comma regardless of locale.
 ## Dictionaries
 
 kobo-vocab uses Kobo-format dictionaries (`dicthtml-*.zip`) — the same format the reader
-itself uses. Put yours in `dict/` locally (gitignored, not checked into the repo — bring your
-own); `deploy-ftp.sh` uploads them to **`/mnt/onboard/.kobo/custom-dict/`** on the device,
-which is where `dict_dir` points.
+itself uses. Copy yours to **`/mnt/onboard/.kobo/custom-dict/`** on the device, which is
+where `dict_dir` points by default.
 
 That location is deliberate. A dictionary in `custom-dict` is one Nickel lists, so it is the
 dictionary the Kobo uses when you long-press a word while reading — and therefore the one
 whose name it writes into `WordList.DictSuffix`. Pointing `dict_dir` at the same folder means
 every word you looked up is a word this tool can look up again. A private copy beside the app
 works too, but the two drift, and then a word Nickel found is one kobo-vocab misses.
-
-Dictionaries are the only thing `deploy-ftp.sh` writes outside the app folder. It overwrites
-same-named files and leaves everything else in `custom-dict` alone.
 
 The `dicthtml-nl-de.zip` used during development is a personal digitization of Van Dale's
 Dutch–German dictionary, not a freely redistributable one, which is why `dict/` stays
