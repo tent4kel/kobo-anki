@@ -967,8 +967,9 @@ func drawDecksScreen() {
 
 		path := core.DeckCSVPath(dataDir, d)
 		c, _ := core.LoadCards(path)
-		// The real backlog, deliberately - not what a sitting would open
-		// with. The learning pool decides how cards arrive; it does not get
+		// The real backlog, deliberately - not just what the pool would hand
+		// over first. The pool paces how fast unseen cards trickle into a
+		// sitting; it does not shrink the work waiting, so it does not get
 		// to rewrite the number that says where the deck actually stands.
 		due := core.CountDueCards(c)
 
@@ -1265,11 +1266,9 @@ func drawDoneScreen() {
 	topHalf := Rect{contentRect.X, contentRect.Y, contentRect.W, contentRect.H / 2}
 	drawLabel(topHalf, "Done!", FontMenu, activeStyle.SizeCard, "")
 
-	// "Nothing due" is the scheduler's verdict on right now, and the learning
-	// pool is part of the scheduler - so this screen says the same thing
-	// whether the deck is empty or the pool is holding new words back. The
-	// deck list is where the real backlog lives; this is not the place to
-	// explain a mechanism nobody should have to think about.
+	// This only shows once the sitting has actually drained every due card,
+	// seen or not - the learning pool paces how fast unseen ones trickle in,
+	// it never leaves any of them behind for "Done" to paper over.
 	botHalf := Rect{contentRect.X, contentRect.Y + contentRect.H/2, contentRect.W, contentRect.H / 2}
 	drawLabel(botHalf, fmt.Sprintf("No more cards due in %s", currentDeck), FontMenu, activeStyle.SizeMenu, "")
 

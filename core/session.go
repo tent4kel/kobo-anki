@@ -39,31 +39,30 @@ type Session struct {
 	queue []string
 	pos   int
 
-	// held is the new cards this deck could introduce, in the order they
-	// would be, minus the ones already let in. The pool is a rolling window
-	// rather than a quota for the sitting: the moment a card matures out of
-	// it, the next word here takes its slot.
+	// held is the new (never-seen) due cards this deck could still
+	// introduce, in the order they would be, minus the ones already let in.
 	held []string
 
-	// pending marks new cards already let into the queue. They hold a slot
-	// from the moment they are introduced - not from the moment they are
-	// first answered - or a single freed slot would let the whole deck in.
-	// Entries are never removed: once a card is answered it stops being New
-	// and IsActive counts it instead, so the State test below retires it.
+	// pending marks new cards already let into this sitting. Membership is
+	// permanent even after the card is rated - inFlightNew is what actually
+	// tells admitted-and-done-with apart from admitted-and-still-ahead, by
+	// checking live State rather than pruning this map.
 	pending map[string]bool
 }
 
 // SessionConfig is the learning-mode policy. The zero value is a session with
 // no new-card gate and no re-queueing, i.e. the old behaviour.
 type SessionConfig struct {
-	// LearningPool caps how many cards may be in flight - seen but not yet
-	// learned - at once. New cards are admitted only to fill the remaining
-	// slots. 0 disables the gate and offers every due card.
+	// LearningPool caps how many never-seen cards may be in progress at once
+	// - admitted but not yet graduated to a real interval. It has no other
+	// job: it does not shrink the total amount of work and does not look at
+	// cards from other days - it only paces how fast unseen cards trickle
+	// into the sitting you are already in, and how many you are juggling at
+	// once while they're still being learned, so a big deck doesn't dump
+	// every new word on you back to back. The instant an admitted card
+	// graduates, its slot goes to the next one in held. 0 disables the gate
+	// and admits every new due card immediately.
 	LearningPool int
-
-	// MatureInterval is the scheduled interval, in days, at which a card
-	// counts as learned and frees its slot in the pool.
-	MatureInterval int
 
 	// StepGap is how many other cards are shown before a card that is still
 	// mid-learning-step comes back. Clamped to the end of the queue when
@@ -71,28 +70,12 @@ type SessionConfig struct {
 	StepGap int
 }
 
-// IsMature reports whether FSRS trusts this card for at least matureInterval
-// days - the point at which it stops occupying a slot in the learning pool.
-//
-// This reads ScheduledDays rather than State on purpose. State looks like the
-// natural answer (Learning means learning) but it only works under the
-// short-term scheduler: the long-term one sends every rated card straight to
-// Review and never uses Learning or Relearning at all. ScheduledDays means
-// the same thing under both - and a card mid-step has 0, which correctly
-// reads as not mature.
-func IsMature(c Card, matureInterval int) bool {
-	return c.State != fsrs.New && c.ScheduledDays >= uint64(matureInterval)
-}
-
-// IsActive reports whether a card is in flight: seen at least once, not yet
-// mature. These are the cards the learning pool counts.
-func IsActive(c Card, matureInterval int) bool {
-	return c.State != fsrs.New && !IsMature(c, matureInterval)
-}
-
 // NewSession builds the running order for one sitting: every due card that
 // has been seen before, plus as many new words as the learning pool has room
-// for right now. More are let in during the sitting as room appears.
+// for right now. More are let in during the sitting as admitted ones
+// graduate and free their slot - see topUp - so the sitting always ends with
+// every due card, seen or not, shown at least once. The pool only ever
+// changes the order things arrive in, never whether they do.
 func NewSession(cards []Card, cfg SessionConfig) *Session {
 	s := &Session{cfg: cfg, pending: map[string]bool{}}
 	for _, c := range cards {
@@ -108,23 +91,6 @@ func NewSession(cards []Card, cfg SessionConfig) *Session {
 	shuffle(s.queue)
 	shuffle(s.held)
 	s.topUp(cards)
-
-	// The pool paces how fast new words arrive; it does not get to leave you
-	// with nothing to do while words are waiting. A sitting can otherwise open
-	// empty for days at a time - the pool sitting over its cap because those
-	// cards were learned before it existed, or simply every review being a few
-	// days out - and the deck list would be advertising work the app then
-	// refuses to hand over.
-	//
-	// So when nothing else is studiable, one sitting's worth comes in
-	// regardless of the cap. That is bounded: those words are in flight the
-	// moment they are introduced, so inPool is over the cap for the rest of
-	// the sitting and topUp admits nothing more.
-	if len(s.queue) == 0 {
-		for len(s.held) > 0 && len(s.queue) < s.cfg.LearningPool {
-			s.admit()
-		}
-	}
 	return s
 }
 
@@ -171,16 +137,23 @@ func shuffle(keys []string) {
 	rand.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
 }
 
-// inPool counts the cards occupying the learning pool: everything in flight
-// anywhere in the deck, plus the new words already let into this sitting.
+// inFlight counts admitted words this sitting is still working on - the
+// trickle's only limiter. It is scoped to s.pending (this sitting's own
+// admissions), not the whole deck: cards from other days, or reviews that
+// were already due before the sitting opened, never took a pool slot and
+// have no bearing on how fast unseen cards trickle in today.
 //
-// It is counted over the whole deck, not just the due cards, because a word
-// you are three days into learning still holds its slot on the days it is not
-// due - otherwise the pool would empty and refill every morning.
-func (s *Session) inPool(cards []Card) int {
+// A word occupies its slot from admission until it graduates - ScheduledDays
+// turns nonzero, FSRS's own signal that it now trusts a real interval rather
+// than "ask again in a few minutes" (see requeue). Being touched once is not
+// enough to free the slot: under the short-term scheduler a word often takes
+// two or more ratings to graduate, and until it does it is still work in
+// progress, not a slot to hand to something else. Checked live rather than
+// trusting admission order, since a rating can graduate a word on the spot.
+func (s *Session) inFlight(cards []Card) int {
 	n := 0
-	for _, c := range cards {
-		if IsActive(c, s.cfg.MatureInterval) || (c.State == fsrs.New && s.pending[c.Key()]) {
+	for key := range s.pending {
+		if c := FindCard(cards, key); c != nil && c.ScheduledDays == 0 {
 			n++
 		}
 	}
@@ -189,11 +162,12 @@ func (s *Session) inPool(cards []Card) int {
 
 // topUp lets new words in for as long as the pool has room.
 //
-// This runs after every rating, not just at the start of the sitting, which
-// is what makes the pool a rolling window: the moment a card matures out of
-// it, the next word takes its place, in the same sitting. Each maturing card
-// frees exactly one slot and so admits exactly one word, so the sitting grows
-// only in proportion to the work done in it.
+// This runs after every rating, not just at the start of the sitting: the
+// moment an admitted word graduates, its slot frees and the next one in held
+// takes it, in the same sitting. That is the entire mechanism - there is no
+// day boundary, so held always fully drains into queue by the end of a
+// sitting; the pool only spreads out when that happens, never whether it
+// does.
 func (s *Session) topUp(cards []Card) {
 	if s.cfg.LearningPool <= 0 {
 		// Gate off: everything due, all at once.
@@ -201,7 +175,7 @@ func (s *Session) topUp(cards []Card) {
 		s.held = nil
 		return
 	}
-	for len(s.held) > 0 && s.inPool(cards) < s.cfg.LearningPool {
+	for len(s.held) > 0 && s.inFlight(cards) < s.cfg.LearningPool {
 		s.admit()
 	}
 }
@@ -217,13 +191,12 @@ func (s *Session) admit() {
 	s.queue = slices.Insert(s.queue, at, key)
 }
 
-// CountStudyable reports how many cards a session started now would open with.
-//
-// This is what a deck list should show. CountDueCards still answers the
-// literal question "how many cards are past their due date", but with a
-// learning pool in force that number can be the whole deck while the session
-// opens with ten. It is a floor, not a total: a sitting that matures cards out
-// of the pool picks up new words as it goes.
+// CountStudyable reports how many cards a session started now would open
+// with, before any trickling in happens. CountDueCards is the true backlog -
+// due reviews plus every not-yet-introduced word - and is what the deck list
+// shows; this is the smaller opening batch the pool hands over first. It is a
+// floor, not the total the sitting will eventually get through: held cards
+// keep trickling into the queue as admitted ones are rated.
 func CountStudyable(cards []Card, cfg SessionConfig) int {
 	return NewSession(cards, cfg).Remaining()
 }
@@ -259,8 +232,8 @@ func (s *Session) Rate(cards []Card, rating fsrs.Rating) {
 	if c != nil && (rating == fsrs.Again || c.ScheduledDays == 0) {
 		s.requeue(key)
 	}
-	// That rating may have pushed a card past mature_interval and out of the
-	// pool. If it did, its slot is free now, not next sitting.
+	// If that rating just graduated a pool word, its slot is free now - so
+	// the next held word can come in immediately, same sitting.
 	s.topUp(cards)
 }
 

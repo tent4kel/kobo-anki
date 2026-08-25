@@ -276,10 +276,9 @@ func studyHandler(w http.ResponseWriter, r *http.Request) {
 	if card == nil {
 		// Let the next visit start a fresh sitting.
 		sessionDeck = ""
-		// "Nothing due" is the scheduler's verdict on right now, and the
-		// learning pool is part of the scheduler - so this page reads the same
-		// whether the deck is empty or the pool is holding new words back. The
-		// deck list is where the real backlog lives.
+		// This only fires once the sitting has actually drained every due
+		// card, seen or not - the learning pool paces how fast unseen ones
+		// trickle in, it never leaves any of them behind for "done" to hide.
 		aheadCount = core.CountStudyAhead(cards)
 	}
 	cardsMu.Unlock()

@@ -104,7 +104,7 @@ func TestAgainBringsTheCardBackInTheSameSitting(t *testing.T) {
 				add(seenCard("b", 10))
 				add(seenCard("c", 10))
 			})
-			s := NewSession(cards, SessionConfig{MatureInterval: 7, StepGap: 1})
+			s := NewSession(cards, SessionConfig{StepGap: 1})
 
 			failed := s.Current(cards).Key()
 			// Fail it once, then pass everything from then on.
@@ -138,7 +138,7 @@ func TestNewCardWalksItsLearningStepsInOneSitting(t *testing.T) {
 	useScheduler(t, true)
 
 	cards := deck(func(add func(Card)) { add(newCard("wort")) })
-	s := NewSession(cards, SessionConfig{LearningPool: 10, MatureInterval: 7, StepGap: 3})
+	s := NewSession(cards, SessionConfig{LearningPool: 10, StepGap: 3})
 
 	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
 
@@ -164,7 +164,7 @@ func TestAPassedCardDoesNotComeBack(t *testing.T) {
 			add(seenCard("a", 10))
 			add(seenCard("b", 10))
 		})
-		s := NewSession(cards, SessionConfig{MatureInterval: 7, StepGap: 1})
+		s := NewSession(cards, SessionConfig{StepGap: 1})
 		order := drain(t, s, cards, func(string) fsrs.Rating { return rating })
 		if len(order) != 2 {
 			t.Errorf("%v: shown %d cards, want 2: %v", rating, len(order), order)
@@ -181,7 +181,7 @@ func TestRequeueClampsToTheEndOfTheQueue(t *testing.T) {
 		add(seenCard("a", 10))
 		add(seenCard("b", 10))
 	})
-	s := NewSession(cards, SessionConfig{MatureInterval: 7, StepGap: 10})
+	s := NewSession(cards, SessionConfig{StepGap: 10})
 
 	failed := s.Current(cards).Key()
 	s.Rate(cards, fsrs.Again)
@@ -195,19 +195,21 @@ func TestRequeueClampsToTheEndOfTheQueue(t *testing.T) {
 	}
 }
 
-func TestNewCardsFillOnlyTheFreeSlots(t *testing.T) {
+// The pool caps new admissions, but every already-seen due card is included
+// unconditionally - reviews never compete with new cards for a pool slot.
+func TestNewCardsFillOnlyTheFreeSlotsAlongsideEveryDueReview(t *testing.T) {
 	cards := deck(func(add func(Card)) {
 		for _, id := range []string{"a1", "a2", "a3"} {
-			add(seenCard(id, 1)) // in flight: 1 < mature_interval
+			add(seenCard(id, 1))
 		}
 		for i := range 20 {
 			add(newCard(string(rune('A' + i))))
 		}
 	})
 
-	q := NewSession(cards, SessionConfig{LearningPool: 5, MatureInterval: 7}).queue
-	if len(q) != 5 {
-		t.Fatalf("queue has %d cards, want 3 due + 2 new = 5: %v", len(q), q)
+	q := NewSession(cards, SessionConfig{LearningPool: 5}).queue
+	if len(q) != 8 {
+		t.Fatalf("queue has %d cards, want 3 due reviews + 5 new (the pool) = 8: %v", len(q), q)
 	}
 	fresh := 0
 	for _, key := range q {
@@ -215,71 +217,52 @@ func TestNewCardsFillOnlyTheFreeSlots(t *testing.T) {
 			fresh++
 		}
 	}
-	if fresh != 2 {
-		t.Errorf("admitted %d new cards, want 2 (the free slots): %v", fresh, q)
+	if fresh != 5 {
+		t.Errorf("admitted %d new cards, want 5 (the whole pool - reviews don't share it): %v", fresh, q)
 	}
 }
 
-// The pool is a rolling window, not a quota for the sitting: the moment a card
-// matures out of it, the next word takes the slot - in the same sitting, not
-// the next one.
-func TestMaturingACardLetsTheNextWordInImmediately(t *testing.T) {
+// Rating an admitted new card - any rating, not just a passing one - takes it
+// out of fsrs.New immediately, which is what frees its slot for the next held
+// word, same sitting. There is no multi-day maturity check anywhere in this.
+// Under the long-term scheduler, every grade - including Again - lands on a
+// real (nonzero) interval on the very first rating: Parameters.nextInterval
+// floors at 1 day regardless of stability. So touching and graduating a card
+// are the same event here, whatever grade it gets, and its pool slot frees
+// immediately.
+func TestALongTermRatingGraduatesAndFreesItsSlotImmediately(t *testing.T) {
 	useScheduler(t, false)
 
-	cards := deck(func(add func(Card)) {
-		add(seenCard("alt", 6)) // in flight, and one Good from maturing
-		add(newCard("neu"))
-	})
-	s := NewSession(cards, SessionConfig{LearningPool: 1, MatureInterval: 7, StepGap: 3})
+	for _, grade := range []fsrs.Rating{fsrs.Again, fsrs.Hard, fsrs.Good, fsrs.Easy} {
+		cards := deck(func(add func(Card)) {
+			add(newCard("erste"))
+			add(newCard("zweite"))
+		})
+		s := NewSession(cards, SessionConfig{LearningPool: 1, StepGap: 3})
 
-	// The pool is full, so the sitting opens with the review alone.
-	if got := s.Remaining(); got != 1 {
-		t.Fatalf("sitting opened with %d cards, want just the review", got)
-	}
-	if got := s.Current(cards).Key(); got != "alt" {
-		t.Fatalf("first card is %q, want the review", got)
-	}
-
-	s.Rate(cards, fsrs.Good)
-
-	if sd := FindCard(cards, "alt").ScheduledDays; sd < 7 {
-		t.Fatalf("test setup: %d days is not past mature_interval, nothing freed a slot", sd)
-	}
-	if got := s.Current(cards); got == nil || got.Key() != "neu" {
-		t.Errorf("freed slot did not let the new word in: %v", got)
-	}
-}
-
-// The other half of that: a slot that does not free admits nothing. A new word
-// answered Good is scheduled a few days out, which is still in flight, so it
-// keeps the slot it was given.
-func TestAFullPoolStaysFullDuringTheSitting(t *testing.T) {
-	useScheduler(t, true)
-
-	cards := deck(func(add func(Card)) {
-		for i := range 20 {
-			add(newCard(string(rune('A' + i))))
+		if got := s.Remaining(); got != 1 {
+			t.Fatalf("%v: sitting opened with %d cards, want just the one the pool admits", grade, got)
 		}
-	})
-	s := NewSession(cards, SessionConfig{LearningPool: 2, MatureInterval: 7, StepGap: 3})
+		admitted := s.Current(cards).Key()
 
-	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
+		s.Rate(cards, grade)
 
-	introduced := map[string]bool{}
-	for _, k := range order {
-		introduced[k] = true
-	}
-	if len(introduced) != 2 {
-		t.Errorf("introduced %d words, want 2 - none of them matured, so no slot freed: %v",
-			len(introduced), order)
+		if sd := FindCard(cards, admitted).ScheduledDays; sd == 0 {
+			t.Errorf("%v: long-term rating left ScheduledDays at 0, want a real (if short) interval", grade)
+		}
+		if len(s.pending) != 2 {
+			t.Errorf("%v: freed slot did not let the other new word in: pending=%d, want 2", grade, len(s.pending))
+		}
 	}
 }
 
-// Rating a new word Easy schedules it straight past mature_interval, which
-// frees its own slot and pulls the next word in. That is the intended answer
-// to "I already know this one": the sitting grows by exactly one word per
-// rating, so it is bounded by the work done in it, not unbounded.
-func TestEasyOnANewWordPullsTheNextOneIn(t *testing.T) {
+// Under the short-term scheduler, a card can be touched more than once before
+// it graduates - and until it does, it keeps its pool slot. Rating it (even
+// with a passing grade that doesn't finish the learning step) must not admit
+// a replacement on top of it: that was the collision between the pool and
+// short-term learning steps that let a sitting's working set balloon past
+// LearningPool.
+func TestAnUngraduatedCardKeepsItsSlotUntilItGraduates(t *testing.T) {
 	useScheduler(t, true)
 
 	cards := deck(func(add func(Card)) {
@@ -287,18 +270,55 @@ func TestEasyOnANewWordPullsTheNextOneIn(t *testing.T) {
 			add(newCard(string(rune('A' + i))))
 		}
 	})
-	s := NewSession(cards, SessionConfig{LearningPool: 2, MatureInterval: 7, StepGap: 3})
+	s := NewSession(cards, SessionConfig{LearningPool: 1, StepGap: 3})
 
-	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Easy })
+	if len(s.pending) != 1 || len(s.held) != 5 {
+		t.Fatalf("test setup: want exactly 1 admitted and 5 left in held, got pending=%d held=%d",
+			len(s.pending), len(s.held))
+	}
+	admitted := s.Current(cards).Key()
 
-	if len(order) != 6 {
-		t.Errorf("worked through %d words, want all 6 - one pulled in per Easy: %v", len(order), order)
+	s.Rate(cards, fsrs.Hard) // first touch; short-term Hard repeats the step
+
+	if sd := FindCard(cards, admitted).ScheduledDays; sd != 0 {
+		t.Fatalf("test setup: %q graduated after one Hard (ScheduledDays=%d), want still mid-step", admitted, sd)
+	}
+	if len(s.pending) != 1 || len(s.held) != 5 {
+		t.Errorf("a replacement was admitted before %q graduated: pending=%d held=%d, want unchanged (1, 5)",
+			admitted, len(s.pending), len(s.held))
 	}
 }
 
-// A card you are three days into learning still holds its slot on the days it
-// is not due - otherwise the pool would refill every morning.
-func TestCardsInFlightHoldTheirSlotWhileNotDue(t *testing.T) {
+// The pool never blocks the sitting from finishing: it only paces the order
+// new words arrive in. Every one of them gets shown by the end, one at a time
+// as each admitted word is rated and frees its slot.
+func TestAFullPoolStillDrainsEveryNewWordBeforeTheSittingEnds(t *testing.T) {
+	useScheduler(t, true)
+
+	cards := deck(func(add func(Card)) {
+		for i := range 20 {
+			add(newCard(string(rune('A' + i))))
+		}
+	})
+	s := NewSession(cards, SessionConfig{LearningPool: 2, StepGap: 3})
+
+	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
+
+	introduced := map[string]bool{}
+	for _, k := range order {
+		introduced[k] = true
+	}
+	if len(introduced) != 20 {
+		t.Errorf("introduced %d distinct words, want all 20 - the pool paces intake, it doesn't cap it: %v",
+			len(introduced), order)
+	}
+}
+
+// A future (not-yet-due) card has no bearing on the pool at all: it was never
+// part of this sitting's held or pending, so it neither takes a slot nor
+// needs to "mature" out of one. Only this sitting's own new-card admissions
+// count.
+func TestCardsNotDueTodayDoNotOccupyThePool(t *testing.T) {
 	cards := deck(func(add func(Card)) {
 		for _, id := range []string{"a1", "a2", "a3"} {
 			add(futureCard(id, 1))
@@ -308,58 +328,38 @@ func TestCardsInFlightHoldTheirSlotWhileNotDue(t *testing.T) {
 		}
 	})
 
-	q := NewSession(cards, SessionConfig{LearningPool: 5, MatureInterval: 7}).queue
-	if len(q) != 2 {
-		t.Fatalf("queue has %d cards, want 0 due + 2 new = 2: %v", len(q), q)
+	q := NewSession(cards, SessionConfig{LearningPool: 5}).queue
+	if len(q) != 5 {
+		t.Fatalf("queue has %d cards, want 0 due reviews + 5 new (full pool, nothing held it back) = 5: %v", len(q), q)
 	}
 }
 
-// A full pool holds new words back - but only while there is other work. It
-// paces how fast new words arrive; it does not get to end the sitting.
-func TestAFullPoolHoldsNewWordsBackWhileThereIsOtherWork(t *testing.T) {
-	cards := deck(func(add func(Card)) {
-		for i := range 5 {
-			add(futureCard("a"+string(rune('0'+i)), 1)) // in flight, pool full
-		}
-		add(seenCard("review", 1)) // ...and something due to get on with
-		add(newCard("neu"))
-	})
+// The case that used to make the deck list lie: nothing due besides a pile of
+// new words. A sitting now opens with one pool's worth and, as you work
+// through it, trickles in the rest - the whole backlog, not just the first
+// batch - rather than stopping at the pool size and calling it Done.
+func TestASittingWorksThroughTheWholeBacklogNotJustOnePoolsWorth(t *testing.T) {
+	useScheduler(t, true)
 
-	q := NewSession(cards, SessionConfig{LearningPool: 5, MatureInterval: 7}).queue
-	if !slices.Equal(q, []string{"review"}) {
-		t.Errorf("sitting is %v, want just the due review - the pool is full", q)
-	}
-}
-
-// The case that made the deck list lie: nothing due, the pool over its cap
-// from cards learned before it existed, and 37 words waiting. The old rule
-// opened an empty sitting and showed "Done!" while the deck list advertised
-// the work. Now one sitting's worth comes in regardless of the cap.
-func TestAnEmptySittingTakesNewWordsAnyway(t *testing.T) {
 	cards := deck(func(add func(Card)) {
-		for i := range 13 { // over a cap of 10, as the live deck was
-			add(futureCard(fmt.Sprintf("old%02d", i), 1))
-		}
 		for i := range 37 {
 			add(newCard(fmt.Sprintf("neu%02d", i)))
 		}
 	})
-	cfg := SessionConfig{LearningPool: 10, MatureInterval: 7, StepGap: 3}
+	cfg := SessionConfig{LearningPool: 10, StepGap: 3}
 
 	s := NewSession(cards, cfg)
 	if got := s.Remaining(); got != 10 {
-		t.Fatalf("sitting opened with %d cards, want a pool's worth (10)", got)
+		t.Fatalf("sitting opened with %d cards, want a pool's worth (10) as the opening batch", got)
 	}
-	// Bounded to one batch: those ten are in flight the moment they are
-	// introduced, so the rolling top-up must not keep pulling more in.
-	useScheduler(t, true)
+
 	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
 	introduced := map[string]bool{}
 	for _, k := range order {
 		introduced[k] = true
 	}
-	if len(introduced) != 10 {
-		t.Errorf("worked through %d words, want the 10 admitted and no more", len(introduced))
+	if len(introduced) != 37 {
+		t.Errorf("worked through %d words, want all 37 - the pool paces arrival, it never leaves any behind", len(introduced))
 	}
 }
 
@@ -370,33 +370,8 @@ func TestLearningPoolZeroOffersEveryDueCard(t *testing.T) {
 		}
 	})
 
-	if q := NewSession(cards, SessionConfig{LearningPool: 0, MatureInterval: 7}).queue; len(q) != 20 {
+	if q := NewSession(cards, SessionConfig{LearningPool: 0}).queue; len(q) != 20 {
 		t.Errorf("queue has %d cards, want all 20 with the gate off", len(q))
-	}
-}
-
-func TestMaturityFreesThePoolSlot(t *testing.T) {
-	tests := []struct {
-		name   string
-		card   Card
-		active bool
-		mature bool
-	}{
-		{"never seen", newCard("x"), false, false},
-		{"mid learning step", Card{ID: "x", State: fsrs.Learning, ScheduledDays: 0}, true, false},
-		{"a day below the bar", seenCard("x", 6), true, false},
-		{"exactly at the bar", seenCard("x", 7), false, true},
-		{"well past it", seenCard("x", 30), false, true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IsActive(tc.card, 7); got != tc.active {
-				t.Errorf("IsActive = %v, want %v", got, tc.active)
-			}
-			if got := IsMature(tc.card, 7); got != tc.mature {
-				t.Errorf("IsMature = %v, want %v", got, tc.mature)
-			}
-		})
 	}
 }
 
@@ -415,7 +390,7 @@ func TestEveryDueCardIsShownExactlyOnce(t *testing.T) {
 		}
 	})
 
-	s := NewSession(cards, SessionConfig{MatureInterval: 7, StepGap: 3})
+	s := NewSession(cards, SessionConfig{StepGap: 3})
 	order := drain(t, s, cards, func(string) fsrs.Rating { return fsrs.Good })
 
 	for _, id := range ids {
@@ -438,7 +413,7 @@ func TestStudyAheadOffersFutureCardsSoonestFirst(t *testing.T) {
 			add(c)
 		}
 	})
-	cfg := SessionConfig{LearningPool: 10, MatureInterval: 7, StepGap: 3}
+	cfg := SessionConfig{LearningPool: 10, StepGap: 3}
 
 	// Nothing is due, so an ordinary sitting is empty.
 	if got := NewSession(cards, cfg).Remaining(); got != 0 {
@@ -465,7 +440,7 @@ func TestStudyAheadSkipsCardsThatAreAlreadyDue(t *testing.T) {
 		add(futureCard("later", 10))
 	})
 
-	s := NewStudyAheadSession(cards, SessionConfig{LearningPool: 10, MatureInterval: 7})
+	s := NewStudyAheadSession(cards, SessionConfig{LearningPool: 10})
 	if got := s.queue; !slices.Equal(got, []string{"later"}) {
 		t.Errorf("study-ahead queue is %v, want just the card that is not due", got)
 	}
@@ -477,15 +452,15 @@ func TestCountStudyableMatchesWhatTheSessionHandsOver(t *testing.T) {
 	cards := deck(func(add func(Card)) {
 		add(seenCard("a", 1))
 		add(seenCard("b", 1))
-		add(futureCard("c", 1))
+		add(futureCard("c", 1)) // not due - irrelevant to both counts
 		for i := range 20 {
 			add(newCard(string(rune('A' + i))))
 		}
 	})
-	cfg := SessionConfig{LearningPool: 5, MatureInterval: 7, StepGap: 3}
+	cfg := SessionConfig{LearningPool: 5, StepGap: 3}
 
-	// Two new cards fit alongside the three in flight, so the deck list should
-	// promise 5 - not the 22 cards whose due date has technically passed.
+	// The two due reviews plus a pool's worth of new cards (5) is the opening
+	// batch - not the 22 cards whose due date has technically passed.
 	want := CountStudyable(cards, cfg)
 	if due := CountDueCards(cards); due == want {
 		t.Fatalf("CountStudyable and CountDueCards agree (%d); the gate is not doing anything", want)
@@ -499,11 +474,24 @@ func TestCountStudyableMatchesWhatTheSessionHandsOver(t *testing.T) {
 
 func TestLearningModeSettingsAreRead(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "anki-core.conf")
-	os.WriteFile(p, []byte("learning_pool=25\nmature_interval=21\nstep_gap=5\n"), 0644)
+	os.WriteFile(p, []byte("learning_pool=25\nstep_gap=5\n"), 0644)
 
 	cfg := LoadCoreConfig(p)
-	if want := (SessionConfig{LearningPool: 25, MatureInterval: 21, StepGap: 5}); cfg.Session() != want {
+	if want := (SessionConfig{LearningPool: 25, StepGap: 5}); cfg.Session() != want {
 		t.Errorf("Session() = %+v, want %+v", cfg.Session(), want)
+	}
+}
+
+// A config left over from before mature_interval was removed should be
+// flagged, not silently ignored - it no longer means anything, and a leftover
+// setting nobody's reading is exactly what ConfigWarnings exists to surface.
+func TestRemovedMatureIntervalSettingWarns(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "anki-core.conf")
+	os.WriteFile(p, []byte("mature_interval=21\n"), 0644)
+
+	out := captureLog(t, func() { LoadCoreConfig(p) })
+	if !strings.Contains(out, "mature_interval") {
+		t.Errorf("no warning for the removed setting:\n%s", out)
 	}
 }
 

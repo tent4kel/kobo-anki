@@ -89,8 +89,7 @@ reverse=false               # swap front/back
 request_retention=0.9       # FSRS target retention (0.0-1.0)
 maximum_interval=36500      # max days between reviews
 enable_short_term=true      # learning steps (see Scheduling)
-learning_pool=10            # max cards part-learned at once; 0 = no gate
-mature_interval=7           # scheduled days at which a card counts learned
+learning_pool=10            # max un-rated new cards admitted at once; 0 = no gate
 step_gap=3                  # cards shown before an "Again" card comes back
 ```
 
@@ -360,48 +359,29 @@ coming back — the sitting ends when you stop failing it.
 
 ### Learning mode
 
-`learning_pool` caps how many cards may be *in flight* — seen at least once,
-not yet learned — at the same time. New words are introduced only to fill the
-free slots, so a 500-word deck starts as a manageable handful and grows as the
-first words stick. The pool is counted over the whole deck, not just today's
-due cards: a word you are three days into learning still holds its slot on the
-days it is not due, otherwise the pool would refill every morning.
+`learning_pool` caps how many *never-seen* words may be in progress at once —
+admitted into the sitting but not yet graduated to a real interval. It has
+exactly one job: pacing new words, both how fast they arrive and how many
+you're juggling at once while they're still being learned, so a 500-word deck
+doesn't dump all 500 on you back to back. It has no effect on reviews — every
+due review is always included, unconditionally, and never competes with new
+words for a pool slot.
 
-It is a rolling window, not a target for the day or for the sitting. The moment
-a card matures out of the pool, the next word takes its slot — in the same
-sitting, a few cards later, not tomorrow. So a sitting that clears ten reviews
-picks up ten new words as it goes, interleaved with the reviews rather than
-queued up behind them. Each maturing card frees exactly one slot and so lets in
-exactly one word, which keeps a sitting proportional to the work done in it.
+A word occupies its slot from admission until it graduates — until FSRS trusts
+it with a real (nonzero) interval rather than "ask again in a few minutes."
+Under the long-term scheduler that's every word's very first rating, whatever
+grade it gets; under the short-term scheduler a word can take two or more
+ratings to graduate, and it keeps its slot for all of them, so `learning_pool`
+words are what you're actively working on, not merely words you've glanced at
+once. Only once a slot frees does the next held word come in. By the end of
+the sitting, every due word — seen or unseen — has been shown at least once.
+Set `learning_pool=0` to turn the gate off entirely and admit every new word
+at once, as before.
 
-The pool paces how fast new words arrive; it never ends a sitting. If nothing
-else is studiable — the pool sitting over its cap because those cards were
-learned before it existed, or simply every review being a few days out — one
-sitting's worth of new words comes in regardless of the cap. Without that, a
-deck can show a backlog on the deck list and then refuse to hand any of it
-over, which is a bug however you label it. It stays bounded: those words are in
-flight from the moment they are introduced, so nothing further is admitted for
-the rest of the sitting.
-
-One consequence worth knowing: rating a *new* word Easy schedules it straight
-past `mature_interval`, so it frees its own slot on the spot and pulls the next
-word in. That is the intended answer to "I already know this one" — it is how
-you get through vocabulary you only need to confirm — but it does mean an Easy
-tap always costs you a new word.
-
-`mature_interval` is where a card stops counting as in flight — the scheduled
-interval, in days, at which FSRS is treating it as known. With
-`request_retention=0.9` an interval in days is roughly the stability in days,
-so a word runs about 3d → 4d → 11d → 25d, and the default of 7 frees a slot on
-about the third successful review. Raising it to 21 (Anki's "mature" line)
-makes new words trickle in considerably more slowly. Set `learning_pool=0` to
-turn the gate off entirely and offer every due card, as before.
-
-The deck list keeps showing the real backlog — every card past its due date —
-not the pool-limited number a sitting opens with. The pool decides how cards
-arrive; it does not get to rewrite the number that says where the deck actually
-stands. The stats page shows both, so the difference is visible where it's
-useful rather than baked into the headline figure.
+The deck list shows the real backlog — every card past its due date, unseen
+words included — not the smaller opening batch a sitting starts with. The
+stats page shows both, so the difference is visible where it's useful rather
+than baked into the headline figure.
 
 ### Studying ahead
 

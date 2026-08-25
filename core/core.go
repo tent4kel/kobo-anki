@@ -20,9 +20,8 @@ type CoreConfig struct {
 	EnableShortTerm  bool
 
 	// Learning mode - see SessionConfig, whose fields these are.
-	LearningPool   int
-	MatureInterval int
-	StepGap        int
+	LearningPool int
+	StepGap      int
 
 	// HTMLFontScale is a multiplier layered on top of each binary's own
 	// baseline correction for an html/apkg card's literal CSS font sizes -
@@ -41,9 +40,8 @@ type CoreConfig struct {
 // Session returns the learning-mode policy these settings describe.
 func (c CoreConfig) Session() SessionConfig {
 	return SessionConfig{
-		LearningPool:   c.LearningPool,
-		MatureInterval: c.MatureInterval,
-		StepGap:        c.StepGap,
+		LearningPool: c.LearningPool,
+		StepGap:      c.StepGap,
 	}
 }
 
@@ -54,7 +52,6 @@ func LoadCoreConfig(path string) CoreConfig {
 		MaximumInterval:  36500,
 		EnableShortTerm:  true,
 		LearningPool:     10,
-		MatureInterval:   7,
 		StepGap:          3,
 		HTMLFontScale:    1.0,
 	}
@@ -103,10 +100,6 @@ func LoadCoreConfig(path string) CoreConfig {
 		case "learning_pool":
 			if v, ok := warn.Int(lineNo, key, val); ok {
 				cfg.LearningPool = v
-			}
-		case "mature_interval":
-			if v, ok := warn.Int(lineNo, key, val); ok {
-				cfg.MatureInterval = v
 			}
 		case "step_gap":
 			if v, ok := warn.Int(lineNo, key, val); ok {

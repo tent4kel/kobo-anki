@@ -21,27 +21,24 @@ maximum_interval=36500
 # a Good right after an Again gives back none of what the Again took away.
 enable_short_term=true
 
-# Learning mode: hold new words back until the ones already in flight have
-# stuck, instead of offering a freshly generated deck all at once.
+# Learning mode: trickle new words into a sitting instead of dumping a
+# freshly generated deck on you all at once.
 #
-# learning_pool is how many cards may be part-learned at the same time. New
-# words are introduced only to fill the free slots. It is a rolling window,
-# not a daily target: the moment a card matures out of the pool the next word
-# takes its slot, in the same sitting. 0 turns the gate off and offers every
-# due card, which is how this worked before the setting existed.
-#
-# mature_interval is the scheduled interval, in days, at which a card counts
-# as learned and gives its slot back. Note that rating a new word Easy puts
-# it past this in one tap, freeing its own slot and pulling the next word in. With request_retention=0.9 an interval
-# in days is roughly the stability in days, so a word runs about
-# 3d -> 4d -> 11d -> 25d: at 7 a slot frees on the third successful review.
-# Raise it (21 is Anki's "mature" line) to make new words trickle in slower.
+# learning_pool is how many never-seen words may be in progress at once -
+# admitted but not yet graduated to a real interval. That is its only job -
+# it does not touch reviews (every due review is always shown,
+# unconditionally). A word keeps its slot from admission until it graduates:
+# under short-term learning steps that can take two or more ratings, so the
+# pool caps what you're actively juggling, not just first exposures. Once a
+# slot frees, the next word waiting comes in, same sitting - so the pool only
+# paces arrival, and by the end of a sitting every due word, seen or not, has
+# been shown at least once. 0 turns the gate off and admits every new word at
+# once.
 #
 # step_gap is how many other cards are shown before one you rated Again - or
 # one still mid-learning-step - comes back. It is a target, not a promise:
 # with fewer cards than that left, it goes to the end of the sitting instead.
 learning_pool=10
-mature_interval=7
 step_gap=3
 
 # Multiplier layered on top of each binary's own baseline correction for an
