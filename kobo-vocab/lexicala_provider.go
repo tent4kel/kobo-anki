@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -193,26 +192,18 @@ func (p *LexicalaProvider) get(path string, params url.Values, out interface{}) 
 		return ErrNotFound
 	}
 
-	req, err := http.NewRequest("GET", p.baseURL+path+"?"+params.Encode(), nil)
+	headers := map[string]string{
+		"X-RapidAPI-Key":  p.token,
+		"X-RapidAPI-Host": p.host,
+	}
+	status, body, err := doRequest(p.client, "GET", p.baseURL+path+"?"+params.Encode(), nil, headers)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-RapidAPI-Key", p.token)
-	req.Header.Set("X-RapidAPI-Host", p.host)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 	p.quota.record()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("lexicala %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+	if status != http.StatusOK {
+		return fmt.Errorf("lexicala %s: HTTP %d: %s", path, status, strings.TrimSpace(string(body)))
 	}
 	return json.Unmarshal(body, out)
 }

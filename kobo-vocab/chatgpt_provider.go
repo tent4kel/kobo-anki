@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -143,20 +142,11 @@ If you cannot confidently identify the word, return {"source_headword": "", "sou
 		return Entry{}, err
 	}
 
-	req, err := http.NewRequest("POST", p.baseURL+"chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return Entry{}, err
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + p.token,
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.token)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return Entry{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	status, body, err := doRequest(p.client, "POST", p.baseURL+"chat/completions", bytes.NewReader(payload), headers)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -168,8 +158,8 @@ If you cannot confidently identify the word, return {"source_headword": "", "sou
 	if result.Error != nil {
 		return Entry{}, fmt.Errorf("chatgpt: API error: %s", result.Error.Message)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return Entry{}, fmt.Errorf("chatgpt: HTTP %d: %s", resp.StatusCode, truncateForLog(body))
+	if status != http.StatusOK {
+		return Entry{}, fmt.Errorf("chatgpt: HTTP %d: %s", status, truncateForLog(body))
 	}
 	if len(result.Choices) == 0 {
 		return Entry{}, fmt.Errorf("chatgpt: no choices in response")

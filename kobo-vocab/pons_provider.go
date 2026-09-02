@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -145,19 +144,12 @@ func (p *PonsProvider) Lookup(word, fromLang, toLang string) (Entry, error) {
 		"ref": {"true"},
 	}
 
-	req, err := http.NewRequest("GET", p.endpoint+"?"+params.Encode(), nil)
+	status, body, err := doRequest(p.client, "GET", p.endpoint+"?"+params.Encode(), nil, map[string]string{"X-Secret": p.secret})
 	if err != nil {
 		return Entry{}, err
 	}
-	req.Header.Set("X-Secret", p.secret)
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return Entry{}, err
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
+	switch status {
 	case http.StatusOK:
 	case http.StatusNoContent:
 		// The API's documented "no results" case, and by far the most
@@ -184,12 +176,11 @@ func (p *PonsProvider) Lookup(word, fromLang, toLang string) (Entry, error) {
 		p.cooldown.trip(today)
 		return Entry{}, fmt.Errorf("pons: out of allowance (HTTP 503) - disabled until tomorrow")
 	default:
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return Entry{}, fmt.Errorf("pons: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return Entry{}, fmt.Errorf("pons: HTTP %d: %s", status, strings.TrimSpace(string(body)))
 	}
 
 	var results []ponsResult
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+	if err := json.Unmarshal(body, &results); err != nil {
 		return Entry{}, fmt.Errorf("pons: %w", err)
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -35,4 +36,32 @@ func newHTTPClient(timeout time.Duration, caCertPath string) *http.Client {
 		Timeout:   timeout,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
 	}
+}
+
+// doRequest issues one HTTP request and returns the status code and full
+// body, centralizing the build/send/close/read boilerplate every provider
+// repeats. Callers keep their own status-code interpretation and body
+// decoding, since those genuinely differ per provider (Pons's
+// cooldown/circuit-breaker switch, ChatGPT's error-body shape, Lexicala's
+// quota) - only the transport plumbing belongs here.
+func doRequest(client *http.Client, method, url string, body io.Reader, headers map[string]string) (status int, respBody []byte, err error) {
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return 0, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, respBody, nil
 }

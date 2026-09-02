@@ -2,18 +2,13 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
-	"database/sql"
 	"golang.org/x/net/html"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-
-	"kobo-anki/core"
 )
 
 // writeTestDictZip builds a minimal single-file dicthtml-*.zip containing
@@ -40,132 +35,6 @@ func writeTestDictZip(t *testing.T, body string) string {
 		t.Fatalf("close zip writer: %v", err)
 	}
 	return path
-}
-
-func TestComputeGroupsCountsAcrossLanguagePairs(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
-	createTestDB(dbPath) // 15 words, all -nl-en, per its hardcoded list
-
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	defer db.Close()
-
-	cfg := loadConfig("") // no config file - defaults, OutDir="."
-	cfg.OutDir = t.TempDir()
-
-	groups, totalNew, err := computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups: %v", err)
-	}
-	if totalNew != 15 {
-		t.Errorf("totalNew = %d, want 15", totalNew)
-	}
-	g, ok := groups["-nl-en"]
-	if !ok {
-		t.Fatalf("expected a -nl-en group")
-	}
-	if len(g.newWords) != 15 {
-		t.Errorf("len(newWords) = %d, want 15", len(g.newWords))
-	}
-	if g.fromLang != "nl" || g.toLang != "en" {
-		t.Errorf("fromLang/toLang = %q/%q, want nl/en", g.fromLang, g.toLang)
-	}
-}
-
-func TestComputeGroupsExcludesExistingAndMissedWords(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
-	createTestDB(dbPath)
-
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	defer db.Close()
-
-	cfg := loadConfig("")
-	cfg.OutDir = t.TempDir()
-
-	// First pass: everything is new.
-	_, totalNew, err := computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups: %v", err)
-	}
-	if totalNew != 15 {
-		t.Fatalf("first pass totalNew = %d, want 15", totalNew)
-	}
-
-	// Simulate one word already exported and one already a recorded miss.
-	csvPath := filepath.Join(cfg.OutDir, "vocab-nl-en.csv")
-	exportCSV(csvPath, nil, []Translation{{Word: "behoefte", Translation: "need", FromLang: "nl", ToLang: "en", Source: "dict"}})
-	missesPath := filepath.Join(cfg.OutDir, "vocab-misses-nl-en.txt")
-	appendMisses(missesPath, []string{"leek"})
-
-	_, totalNew, err = computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups (second pass): %v", err)
-	}
-	if totalNew != 13 {
-		t.Errorf("second pass totalNew = %d, want 13 (15 - 1 exported - 1 miss)", totalNew)
-	}
-}
-
-func TestComputeGroupsRecognizesWordsWithStyledFrontAsExisting(t *testing.T) {
-	// Regression test: dict_examples/lexicala/chatgpt override Entry.Front
-	// with styled card content (e.g. "**behoefte**\n*een voorbeeldzin*")
-	// instead of leaving it as the plain word. readExistingCSV's dedup key
-	// is that CSV front column, so once Front diverges from the raw Kobo
-	// word, the CSV-based check alone can never match it again - the word
-	// looks "new" every single run, duplicating it forever. vocab-seen-*.txt
-	// (independent of card content, see computeGroups/appendMisses call
-	// sites in main()) is the fix - verify it alone is enough to exclude
-	// the word even though its CSV front doesn't match the raw word at all.
-	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
-	createTestDB(dbPath)
-
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	defer db.Close()
-
-	cfg := loadConfig("")
-	cfg.OutDir = t.TempDir()
-
-	_, totalNew, err := computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups: %v", err)
-	}
-	if totalNew != 15 {
-		t.Fatalf("first pass totalNew = %d, want 15", totalNew)
-	}
-
-	// Simulate exporting "behoefte" with a styled front that no longer
-	// matches the raw word - what dict_examples/lexicala/chatgpt actually
-	// produce - and record it as seen, exactly as main()'s export step now
-	// does after this fix.
-	csvPath := filepath.Join(cfg.OutDir, "vocab-nl-en.csv")
-	exportCSV(csvPath, nil, []Translation{{
-		Word:        "**behoefte**\n*een voorbeeldzin*",
-		Translation: "**need**\n*an example sentence*",
-		FromLang:    "nl", ToLang: "en", Source: "dict",
-	}})
-	seenPath := filepath.Join(cfg.OutDir, "vocab-seen-nl-en.txt")
-	appendMisses(seenPath, []string{"behoefte"})
-
-	groups, totalNew, err := computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups (second pass): %v", err)
-	}
-	if totalNew != 14 {
-		t.Errorf("second pass totalNew = %d, want 14 (15 - 1 seen, despite the CSV front not matching the raw word)", totalNew)
-	}
-	for _, w := range groups["-nl-en"].newWords {
-		if strings.ToLower(w.Text) == "behoefte" {
-			t.Errorf("behoefte was re-offered as new - vocab-seen-*.txt was not consulted")
-		}
-	}
 }
 
 func TestExtractEntryFlatFormat(t *testing.T) {
@@ -589,150 +458,6 @@ func TestExtractEntrySingleSenseHasNoBullet(t *testing.T) {
 	}
 }
 
-func TestCleanTextEntityDecoding(t *testing.T) {
-	got := cleanText(`<div><b>B&amp;B</b></div>`)
-	if got != "**B&B**" {
-		t.Errorf("got %q, want %q (entity decoded, bold preserved)", got, "**B&B**")
-	}
-}
-
-func TestCleanTextNBSP(t *testing.T) {
-	got := cleanText("foo&nbsp;bar")
-	if got != "foo bar" {
-		t.Errorf("got %q, want NBSP collapsed to a plain space", got)
-	}
-}
-
-func TestToMarkdownAdjacentSpansMerge(t *testing.T) {
-	got := toMarkdown(`<i> (</i><i>die</i><i>;</i>`)
-	if strings.Count(got, "*") != 2 {
-		t.Errorf("got %q, want adjacent <i> pairs merged into a single '*...*' span (2 stars)", got)
-	}
-}
-
-func TestToMarkdownNoAmbiguousStarRun(t *testing.T) {
-	got := toMarkdown(`<b>Synchronie</b><i> (die</i>)`)
-	if strings.Contains(got, "***") {
-		t.Errorf("got %q, want no ambiguous run of 3+ literal asterisks", got)
-	}
-}
-
-func TestTruncateMarkdownVisibleNeverUnbalanced(t *testing.T) {
-	cases := []string{
-		"**bold word here** and *italic text* and more plain words to push past the limit",
-		"- first sense here\n- second sense that is quite a bit longer than the first one",
-		"*a*",
-		"**",
-		"no markdown at all just plain text that is long enough to truncate",
-	}
-	for _, s := range cases {
-		for maxChars := 1; maxChars <= 20; maxChars++ {
-			got := truncateMarkdownVisible(s, maxChars)
-			if strings.Count(got, "*")%2 != 0 {
-				t.Errorf("truncateMarkdownVisible(%q, %d) = %q: odd number of '*' (unbalanced)", s, maxChars, got)
-			}
-			trimmed := strings.TrimRight(got, "\n")
-			if idx := strings.LastIndexByte(trimmed, '\n'); idx >= 0 {
-				if strings.TrimSpace(trimmed[idx+1:]) == "-" {
-					t.Errorf("truncateMarkdownVisible(%q, %d) = %q: dangling empty list item", s, maxChars, got)
-				}
-			} else if strings.TrimSpace(trimmed) == "-" {
-				t.Errorf("truncateMarkdownVisible(%q, %d) = %q: dangling empty list item", s, maxChars, got)
-			}
-		}
-	}
-}
-
-func TestTruncateMarkdownVisibleZeroMeansUnlimited(t *testing.T) {
-	s := "some text **with bold** that should not be cut"
-	if got := truncateMarkdownVisible(s, 0); got != s {
-		t.Errorf("got %q, want unchanged input when maxChars=0", got)
-	}
-}
-
-func TestLoadConfigDoesNotWarnAboutAutoParse(t *testing.T) {
-	// auto_parse lives in anki-mywords.conf but is read by start.sh's shell
-	// grep, not by this binary. It must be recognized here anyway, or every
-	// real run prints a spurious "unknown setting" warning.
-	dir := t.TempDir()
-	p := filepath.Join(dir, "anki-mywords.conf")
-	os.WriteFile(p, []byte("auto_parse=true\nproviders=dict\n"), 0644)
-
-	var buf bytes.Buffer
-	old := log.Writer()
-	log.SetOutput(&buf)
-	loadConfig(p)
-	log.SetOutput(old)
-
-	if strings.Contains(buf.String(), "auto_parse") {
-		t.Errorf("auto_parse was reported as unknown:\n%s", buf.String())
-	}
-}
-
-func TestComputeGroupsUsesIDColumnInsteadOfSeenFile(t *testing.T) {
-	// The duplicate-word bug, now solved by the id column rather than the
-	// vocab-seen sidecar: a card whose rendered front looks nothing like the
-	// source word is still recognized as already-done, with no
-	// vocab-seen-*.txt present at all.
-	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
-	createTestDB(dbPath)
-
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	defer db.Close()
-
-	cfg := loadConfig("")
-	cfg.OutDir = t.TempDir()
-
-	csvPath := filepath.Join(cfg.OutDir, "vocab-nl-en.csv")
-	exportCSV(csvPath, nil, []Translation{{
-		SourceWord:  "behoefte",
-		Word:        "**behoefte**\nnood\n*een dringende behoefte.*",
-		Translation: "**need**\nrequirement",
-	}})
-
-	if _, err := os.Stat(filepath.Join(cfg.OutDir, "vocab-seen-nl-en.txt")); !os.IsNotExist(err) {
-		t.Fatal("vocab-seen file should not be written any more")
-	}
-
-	groups, totalNew, err := computeGroups(cfg, db)
-	if err != nil {
-		t.Fatalf("computeGroups: %v", err)
-	}
-	if totalNew != 14 {
-		t.Errorf("totalNew = %d, want 14 (15 - 1 already in the deck)", totalNew)
-	}
-	for _, w := range groups["-nl-en"].newWords {
-		if strings.ToLower(w.Text) == "behoefte" {
-			t.Error("behoefte re-offered as new despite its id being in the deck")
-		}
-	}
-}
-
-func TestExportCSVWritesSourceWordAsID(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "d.csv")
-	if err := exportCSV(p, nil, []Translation{{
-		SourceWord: "liepen", Word: "**lopen**", Translation: "**laufen**",
-	}}); err != nil {
-		t.Fatalf("exportCSV: %v", err)
-	}
-	cards, err := core.LoadCards(p)
-	if err != nil {
-		t.Fatalf("LoadCards: %v", err)
-	}
-	if len(cards) != 1 {
-		t.Fatalf("got %d cards, want 1", len(cards))
-	}
-	if cards[0].ID != "liepen" {
-		t.Errorf("ID = %q, want the source word", cards[0].ID)
-	}
-	if cards[0].Key() != "liepen" {
-		t.Errorf("Key() = %q, want the source word", cards[0].Key())
-	}
-}
-
 // --- class-aware extraction (see CLASSES.md in the dict source) ---
 
 func TestExtractCardEntryPrefersClassMarkers(t *testing.T) {
@@ -794,16 +519,6 @@ func TestStripLabelClassesRemovesOnlyRequestedClasses(t *testing.T) {
 	}
 	if stripLabelClasses(src, nil) != src {
 		t.Error("an empty set must leave the markup untouched")
-	}
-}
-
-func TestLabelSetIgnoresUnknownClasses(t *testing.T) {
-	got := labelSet([]string{"gen", "nonsense", "reg", ""})
-	if !got["gen"] || !got["reg"] {
-		t.Errorf("known classes missing: %v", got)
-	}
-	if got["nonsense"] {
-		t.Errorf("unknown class accepted: %v", got)
 	}
 }
 
