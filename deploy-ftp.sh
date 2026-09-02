@@ -83,7 +83,12 @@ fi
 # needs this to work at all.
 if [ -d APIs ] && ls APIs/*.json >/dev/null 2>&1; then
     mkdir -p "$STAGE/config/APIs"
-    cp APIs/*.json "$STAGE/config/APIs/"
+    for f in APIs/*.json; do
+        case "$f" in
+            *.state.json) continue ;;
+        esac
+        cp "$f" "$STAGE/config/APIs/"
+    done
 fi
 
 FTP_BASE="ftp://$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER"

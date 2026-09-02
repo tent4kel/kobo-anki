@@ -176,7 +176,7 @@ func (p *PonsProvider) Lookup(word, fromLang, toLang string) (Entry, error) {
 		p.cooldown.trip(today)
 		return Entry{}, fmt.Errorf("pons: out of allowance (HTTP 503) - disabled until tomorrow")
 	default:
-		return Entry{}, fmt.Errorf("pons: HTTP %d: %s", status, strings.TrimSpace(string(body)))
+		return Entry{}, fmt.Errorf("pons: HTTP %d: %s", status, truncateForLog(body))
 	}
 
 	var results []ponsResult

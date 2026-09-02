@@ -20,8 +20,13 @@ func writeConfs(t *testing.T, mywords, core string) string {
 func TestOutDirInheritsDataDir(t *testing.T) {
 	p := writeConfs(t, "providers=dict\n", "data_dir=decks\n")
 	cfg := loadConfig(p)
-	if filepath.Base(cfg.OutDir) != "decks" {
-		t.Errorf("OutDir = %q, want it to follow data_dir=decks", cfg.OutDir)
+	// OutDir must resolve relative to the process's working directory, the
+	// same way cmd/fbink and cmd/server resolve data_dir - not relative to
+	// the config file's own directory (confDir), which those two binaries
+	// have no notion of at all. Joining it against confDir would put
+	// kobo-vocab's decks somewhere those two binaries never look.
+	if cfg.OutDir != "decks" {
+		t.Errorf("OutDir = %q, want exactly %q (cwd-relative, not confDir-relative)", cfg.OutDir, "decks")
 	}
 }
 
@@ -52,7 +57,7 @@ func TestOutDirAgreementIsSilent(t *testing.T) {
 func TestOutDirWithoutCoreConfKeepsOwnValue(t *testing.T) {
 	p := writeConfs(t, "out=words\n", "")
 	cfg := loadConfig(p)
-	if filepath.Base(cfg.OutDir) != "words" {
-		t.Errorf("OutDir = %q, want out= honoured when there is no anki-core.conf", cfg.OutDir)
+	if cfg.OutDir != "words" {
+		t.Errorf("OutDir = %q, want exactly %q (cwd-relative, not confDir-relative)", cfg.OutDir, "words")
 	}
 }

@@ -43,7 +43,9 @@ func newHTTPClient(timeout time.Duration, caCertPath string) *http.Client {
 // repeats. Callers keep their own status-code interpretation and body
 // decoding, since those genuinely differ per provider (Pons's
 // cooldown/circuit-breaker switch, ChatGPT's error-body shape, Lexicala's
-// quota) - only the transport plumbing belongs here.
+// quota) - only the transport plumbing belongs here. Note headers is a
+// map[string]string, so it cannot express the same header name repeated with
+// different values - no current caller needs that, but the next one might.
 func doRequest(client *http.Client, method, url string, body io.Reader, headers map[string]string) (status int, respBody []byte, err error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {

@@ -78,6 +78,7 @@ Add to `/mnt/onboard/.adds/nm/config`:
 
 ```
 menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
+menu_item:main:Update Vocabulary:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start-vocab.sh
 ```
 
 ### Upgrading an existing install
@@ -90,10 +91,15 @@ over SSH or an FTP client:
 cd /mnt/onboard/.adds/kobo-anki
 mkdir -p config logs samples
 mv anki-core.conf anki-fbink.conf anki-mywords.conf cacert.pem cards.css config/
-mv APIs config/
+[ -f anki-apkgimport.conf ] && mv anki-apkgimport.conf config/
+[ -d APIs ] && mv APIs config/
 [ -f french.csv ] && mv french.csv samples/
 rm -f *.log
 ```
+
+If an earlier deploy left a stale nested `.adds/$KOBO_FOLDER/kobo-anki/`
+directory on the device (from before deploy-ftp.sh's double-nesting bug was
+fixed), delete that whole directory too.
 
 Re-deploy after that so the binaries and start scripts land at their new
 locations too.
@@ -598,6 +604,7 @@ kobo-vocab -print-config
 - **start-debug.sh** — Debug launcher for SSH. Same Nickel handling but doesn't reboot on exit (use `reboot` manually when done).
 - **start-fbink.sh** — Minimal launcher, no Nickel management.
 - **start-server.sh** — Starts the web server mode.
+- **start-vocab.sh** — Standalone vocabulary lookup, runs alongside Nickel (no Nickel management needed). Shows live progress via a NickelDBus modal dialog with a Cancel button.
 
 ### A note on suspending/restoring Nickel
 

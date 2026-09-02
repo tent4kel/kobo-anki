@@ -413,15 +413,13 @@ func loadConfig(path string) Config {
 				path, cfg.OutDir, dataDir, coreConfPath)
 		}
 	}
-	if !filepath.IsAbs(cfg.DictDir) {
-		cfg.DictDir = filepath.Join(confDir, cfg.DictDir)
-	}
-	if !filepath.IsAbs(cfg.DBPath) {
-		cfg.DBPath = filepath.Join(confDir, cfg.DBPath)
-	}
-	if !filepath.IsAbs(cfg.OutDir) {
-		cfg.OutDir = filepath.Join(confDir, cfg.OutDir)
-	}
+	// DictDir, DBPath, and OutDir are data locations shared with cmd/fbink
+	// and cmd/server, which have no confDir concept at all - they always
+	// resolve data_dir relative to the process's working directory. They
+	// must NOT be joined against confDir here, or kobo-vocab silently
+	// starts reading/writing decks (and dictionaries, and the Kobo DB)
+	// somewhere the other binaries never look. Only credentials/certs
+	// below are genuinely "next to this config file".
 	if !filepath.IsAbs(cfg.LexicalaConf) {
 		cfg.LexicalaConf = filepath.Join(confDir, cfg.LexicalaConf)
 	}

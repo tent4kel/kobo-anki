@@ -20,8 +20,12 @@ import (
 //       <li><div>second sense...</div></li>
 //     </ol></w>
 //
-// extractEntry below handles both by branching on whether <li> sense blocks
-// are present, rather than assuming one fixed structure.
+// Which shape a dictionary uses is decided once, not by branching per entry:
+// resolveDictProfile (dictparse.go) picks a dictProfile - detectProfile
+// (dictprofile.go) sniffs the markup when none is configured, and "flat" vs
+// "nested" are two of the built-in shapes in dictprofile.go's
+// builtinProfiles - and parseDict/renderEntry (dictparse.go) apply it
+// uniformly to every entry.
 //
 // Note: this format is NOT well-formed HTML5 - <a name="x" /> is written as
 // self-closing but <a> is not a void element per the HTML5 spec, so a real
