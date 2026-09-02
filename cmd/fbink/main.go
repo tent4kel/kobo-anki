@@ -455,7 +455,7 @@ func computeLayout() {
 // deck's override, applied on top of the defaults by effectiveStyle. This
 // mirrors anki-mywords.conf's existing [nl]/[de]/[fr] section convention.
 func loadConfig() {
-	paths := []string{"./anki-fbink.conf", filepath.Join(dataDir, "anki-fbink.conf")}
+	paths := []string{"./config/anki-fbink.conf", filepath.Join(dataDir, "anki-fbink.conf")}
 	var data []byte
 	var confPath string
 	for _, p := range paths {
@@ -1313,12 +1313,12 @@ func main() {
 	fbinkPath = findFbink()
 	debug = os.Getenv("DEBUG") == "1"
 
-	coreCfg := core.LoadCoreConfig("anki-core.conf")
+	coreCfg := core.LoadCoreConfig("config/anki-core.conf")
 	dataDir = coreCfg.DataDir
 	reverseMode = coreCfg.Reverse
 	htmlFontScale = coreCfg.HTMLFontScale
 	globalCardCSSTag = core.BaseCardCSS
-	if css, err := os.ReadFile("cards.css"); err == nil {
+	if css, err := os.ReadFile("config/cards.css"); err == nil {
 		globalCardCSSTag += string(css)
 	}
 	globalCardCSSTag = "<style>" + globalCardCSSTag + "</style>"

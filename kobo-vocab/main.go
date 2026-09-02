@@ -671,7 +671,7 @@ func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, to
 // --- Main ---
 
 func main() {
-	confPath := flag.String("conf", "anki-mywords.conf", "path to config file")
+	confPath := flag.String("conf", "config/anki-mywords.conf", "path to config file")
 	dbOverride := flag.String("db", "", "override db path from config")
 	createTest := flag.Bool("create-test-db", false, "create a test KoboReader.sqlite and exit")
 	testDict := flag.String("test-dict", "", "parse a single dicthtml-*.zip and print entry count + samples, then exit")

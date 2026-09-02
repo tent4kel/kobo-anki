@@ -52,7 +52,7 @@ func main() {
 
 	splitTagsRaw := *splitTagsFlag
 	if splitTagsRaw == "" {
-		splitTagsRaw = loadSplitTagsConfig("anki-apkgimport.conf")
+		splitTagsRaw = loadSplitTagsConfig("config/anki-apkgimport.conf")
 	}
 
 	if err := run(*apkgPath, *deckName, *dataDir, splitTagsRaw); err != nil {

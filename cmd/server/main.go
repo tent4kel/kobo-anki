@@ -231,9 +231,14 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	decks := core.ListDecks(dataDir)
 	var deckInfos []DeckInfo
 	for _, d := range decks {
-		c, err := core.LoadCards(core.DeckCSVPath(dataDir, d))
-		if err != nil {
-			continue
+		path := core.DeckCSVPath(dataDir, d)
+		c := cards
+		if path != csvFile {
+			var err error
+			c, err = core.LoadCards(path)
+			if err != nil {
+				continue
+			}
 		}
 		// The real backlog, deliberately - not what a sitting would open
 		// with. The learning pool decides how cards arrive; it does not get
@@ -431,11 +436,11 @@ func noCache(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
-	coreCfg := core.LoadCoreConfig("anki-core.conf")
+	coreCfg := core.LoadCoreConfig("config/anki-core.conf")
 	dataDir = coreCfg.DataDir
 	htmlFontScale = coreCfg.HTMLFontScale
 	globalCardCSS = core.BaseCardCSS
-	if css, err := os.ReadFile("cards.css"); err == nil {
+	if css, err := os.ReadFile("config/cards.css"); err == nil {
 		globalCardCSS += string(css)
 	}
 	sessionCfg = coreCfg.Session()
