@@ -18,9 +18,9 @@
 #   KOBO_USER=root
 #   KOBO_FOLDER=kobo-anki-beta
 #
-# Never touches words/ (your live flashcard progress) or logs on-device -
-# only the files that ship in the tarball (bin/, APIs/, templates/,
-# start*.sh, *.conf, french.csv, cacert.pem, cards.css) get uploaded/overwritten.
+# Never touches words/ (your live flashcard progress) or logs/ on-device -
+# only the files that ship in the tarball (bin/, templates/, config/,
+# samples/, start*.sh) get uploaded/overwritten.
 #
 # Dictionaries are the one exception to "everything lands under the app
 # folder": dict/*.zip go to /mnt/onboard/.kobo/custom-dict, which is Nickel's
@@ -51,41 +51,45 @@ echo "Building ARM binaries..."
 sh build.sh
 
 echo ""
-echo "Deploying to ftp://$KOBO_USER@$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER/kobo-anki/"
+echo "Deploying to ftp://$KOBO_USER@$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER/"
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
-mkdir -p "$STAGE/kobo-anki/bin" "$STAGE/kobo-anki/templates"
-cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vocab "$STAGE/kobo-anki/bin/"
+mkdir -p "$STAGE/bin" "$STAGE/templates" "$STAGE/config"
+cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vocab "$STAGE/bin/"
 # fbink itself is only uploaded if you already have one built/placed in
 # bin/ locally - it needs an image-support-enabled build (see README), and
 # this script won't silently overwrite a working device copy with nothing.
-[ -f bin/fbink ] && cp bin/fbink "$STAGE/kobo-anki/bin/"
-cp start.sh start-debug.sh start-fbink.sh start-server.sh "$STAGE/kobo-anki/"
-cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/kobo-anki/"
+[ -f bin/fbink ] && cp bin/fbink "$STAGE/bin/"
+cp start.sh start-debug.sh start-fbink.sh start-server.sh start-vocab.sh "$STAGE/"
+cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/config/"
 # apkgimport's split_tags config - optional, most imports don't use it.
-[ -f anki-apkgimport.conf ] && cp anki-apkgimport.conf "$STAGE/kobo-anki/"
+[ -f anki-apkgimport.conf ] && cp anki-apkgimport.conf "$STAGE/config/"
 # CA bundle for the network providers' TLS verification - some Kobo
 # firmware ships with no system CA store at all (see ca_cert in
 # anki-mywords.conf.example), so this is deployed unconditionally.
-cp cacert.pem "$STAGE/kobo-anki/"
-cp templates/*.html "$STAGE/kobo-anki/templates/"
-[ -f french.csv ] && cp french.csv "$STAGE/kobo-anki/"
+cp cacert.pem "$STAGE/config/"
+cp templates/*.html "$STAGE/templates/"
+if [ -f french.csv ]; then
+    mkdir -p "$STAGE/samples"
+    cp french.csv "$STAGE/samples/"
+fi
 # Shared styling for html/apkg cards (core.InjectIntoHead) - not overwritten
 # blindly by anything else, safe to redeploy after editing it.
-[ -f cards.css ] && cp cards.css "$STAGE/kobo-anki/"
+[ -f cards.css ] && cp cards.css "$STAGE/config/"
 # APIs/ (provider credentials, e.g. lexicala.json) - gitignored and only
 # deployed if you've actually populated it; providers=lexicala on-device
 # needs this to work at all.
 if [ -d APIs ] && ls APIs/*.json >/dev/null 2>&1; then
-    mkdir -p "$STAGE/kobo-anki/APIs"
-    cp APIs/*.json "$STAGE/kobo-anki/APIs/"
+    mkdir -p "$STAGE/config/APIs"
+    cp APIs/*.json "$STAGE/config/APIs/"
 fi
 
 FTP_BASE="ftp://$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER"
 cd "$STAGE"
-find kobo-anki -type f | while read -r f; do
+find . -type f | while read -r f; do
+    f="${f#./}"
     echo "  $f"
     curl -sf --max-time 30 -T "$f" --ftp-create-dirs "$FTP_BASE/$f" --user "$KOBO_USER:" || {
         echo "FAILED: $f" >&2
