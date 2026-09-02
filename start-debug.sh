@@ -2,7 +2,8 @@
 # Kobo Anki launcher (debug) — kills Nickel, feeds watchdog.
 # Does NOT reboot on exit (use 'reboot' manually when done debugging).
 cd "$(dirname "$0")"
-LOG=kobo-anki.log
+mkdir -p logs
+LOG=logs/kobo-anki.log
 echo "=== start-debug $(date) ===" >>$LOG
 
 WD_PID=""
@@ -51,7 +52,7 @@ echo "Nickel stopped (waited ${kill_wait}x250ms)" >>$LOG
 rm -f /tmp/nickel-hardware-status
 start_watchdog
 
-./bin/kobo-vocab -conf anki-mywords.conf 2>&1 | tee -a $LOG
+./bin/kobo-vocab -conf config/anki-mywords.conf 2>&1 | tee -a $LOG
 
 ./bin/fbink -c -f
 DEBUG=1 ./bin/kobo-anki-fbink 2>&1 | tee -a $LOG
