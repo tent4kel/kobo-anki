@@ -57,15 +57,18 @@ Then connect the Kobo over USB and copy the files into `.adds/`, giving you this
 │   ├── kobo-vocab
 │   └── fbink              ← from FBInk releases
 ├── start.sh
-├── anki-core.conf          ← copy from the .example files
-├── anki-fbink.conf
-├── anki-mywords.conf
-├── cacert.pem              ← needed for the online providers, see below
-├── cards.css               ← shared styling for html/apkg cards, see below
+├── config/
+│   ├── anki-core.conf      ← copy from the .example files
+│   ├── anki-fbink.conf
+│   ├── anki-mywords.conf
+│   ├── cacert.pem          ← needed for the online providers, see below
+│   ├── cards.css           ← shared styling for html/apkg cards, see below
+│   └── APIs/               ← provider credentials, only if you use them
 ├── dict/                   ← dicthtml-*.zip dictionaries
-├── APIs/                   ← provider credentials, only if you use them
 ├── templates/              ← only needed for server mode
-├── french.csv              ← sample deck; copy into words/ to try it
+├── samples/
+│   └── french.csv          ← sample deck; copy into words/ to try it
+├── logs/                   ← created automatically at first run
 └── words/                  ← flashcard CSVs go here
 ```
 
@@ -76,6 +79,24 @@ Add to `/mnt/onboard/.adds/nm/config`:
 ```
 menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
 ```
+
+### Upgrading an existing install
+
+If you already have kobo-anki installed under the old flat layout (every
+file loose at the app-folder root), move things into place by hand once,
+over SSH or an FTP client:
+
+```
+cd /mnt/onboard/.adds/kobo-anki
+mkdir -p config logs samples
+mv anki-core.conf anki-fbink.conf anki-mywords.conf cacert.pem cards.css config/
+mv APIs config/
+[ -f french.csv ] && mv french.csv samples/
+rm -f *.log
+```
+
+Re-deploy after that so the binaries and start scripts land at their new
+locations too.
 
 ## Configuration
 
@@ -284,7 +305,7 @@ placeholder inside is empty - see the comment above `card_format` in
 `pons`/`lexicala`/`chatgpt` all need working HTTPS, which some Kobo firmware can't do out
 of the box - certain devices ship with no system CA store at all, so every TLS request fails
 with `x509: certificate signed by unknown authority` regardless of provider. `cacert.pem`
-(repo root — copy it to the device alongside the other files listed under
+(repo root — `deploy-ftp.sh` installs it under `config/` on the device, see
 [Installation](#installation)) is a standard CA bundle appended to whatever trust store the
 OS provides, fixing that - see `ca_cert` in `anki-mywords.conf.example`.
 
@@ -444,8 +465,9 @@ merci,thank you
 Any number of columns in between works too: a deck written by an earlier version keeps its
 review history when the missing columns are filled in.
 
-`french.csv` in the repo root is a small ready-to-use sample deck — copy it into your
-`words/` directory to try the app before setting up any dictionaries.
+`french.csv` in the repo root is a small ready-to-use sample deck — `deploy-ftp.sh` installs
+it under `samples/` on the device; copy it into `words/` to try the app before setting up any
+dictionaries.
 
 ### cards.css
 
@@ -572,10 +594,30 @@ kobo-vocab -print-config
 
 ## Launcher scripts
 
-- **start.sh** — Production launcher for NickelMenu. Kills Nickel, feeds the hardware watchdog, runs the app with crash recovery (max 5 restarts), reboots on exit.
-- **start-debug.sh** — Debug launcher for SSH. Same Nickel/watchdog handling but doesn't reboot on exit.
+- **start.sh** — Production launcher for NickelMenu. Kills Nickel, runs the app with crash recovery (max 5 restarts), reboots on exit. Restarting Nickel in place instead of rebooting has been tried twice and reverted both times — see the comment at the top of the file before attempting it again. The hardware watchdog needs no handling here — it's kept fed by an in-kernel thread regardless of what userspace is doing.
+- **start-debug.sh** — Debug launcher for SSH. Same Nickel handling but doesn't reboot on exit (use `reboot` manually when done).
 - **start-fbink.sh** — Minimal launcher, no Nickel management.
 - **start-server.sh** — Starts the web server mode.
+
+### A note on suspending/restoring Nickel
+
+On this device (Kobo Clara BW, model P356, FW 4.45.23697) I could not find a safe way to
+suspend Nickel and hand control back to it without a full reboot. The standard community
+approach — kill `nickel`/`hindenburg`, run your own app, then respawn them directly, as
+koreader.sh and Plato/Cadmus's own `nickel.sh` do — was reimplemented carefully against those
+projects' actual source (env restoration, watchdog handling, wifi state) and cross-checked by
+running Cadmus's own unmodified restart path directly. Both crashed Nickel on this hardware.
+`start.sh` reboots on exit instead; see the comment at its top for the full history before
+retrying this.
+
+Along the way this surfaced an interesting, undocumented piece of Kobo firmware behavior: if
+Nickel crashes repeatedly shortly after boot with a given `/usr/local/Kobo/imageformats/*.so`
+plugin loaded — this is the mechanism NickelMenu and similar patches use to inject themselves —
+the firmware silently renames that plugin from `.so` to `.so.failsafe`, disabling it, to break
+the boot-crash loop. The device itself isn't bricked and Nickel boots fine once the offending
+plugin stops loading, but its side effect (NickelMenu's own menu vanishing) looks alarming if
+you don't know it's happening. Fix: rename `*.so.failsafe` back to `*.so` and reboot. I haven't
+seen this documented anywhere in the usual community references.
 
 ## Credits
 
