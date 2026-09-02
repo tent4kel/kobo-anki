@@ -47,13 +47,20 @@ open_dialog() {
     ndb -m dlgConfirmSetModal true
     ndb -m dlgConfirmShowClose false
     ndb -m dlgConfirmShow
-    DIALOG_OPEN=true
-    sleep 1 # let the first draw actually happen before anything else touches the screen
 
-    # Listen for a Cancel tap for the rest of this run. 600s is far longer
-    # than any realistic lookup; this just needs to outlive the run.
-    "$QNDB" -s dlgConfirmResult -t 600000 >"$CANCEL_OUT" 2>>"$QNDB_LOG" &
-    CANCEL_PID=$!
+    # Without NickelDBus there's no dialog on screen and nothing to cancel -
+    # skip the draw wait and the listener entirely rather than backgrounding
+    # a call to a binary that isn't there. Everything below (the actual
+    # lookup) still runs; it just runs silently.
+    if [ -x "$QNDB" ]; then
+        DIALOG_OPEN=true
+        sleep 1 # let the first draw actually happen before anything else touches the screen
+
+        # Listen for a Cancel tap for the rest of this run. 600s is far longer
+        # than any realistic lookup; this just needs to outlive the run.
+        "$QNDB" -s dlgConfirmResult -t 600000 >"$CANCEL_OUT" 2>>"$QNDB_LOG" &
+        CANCEL_PID=$!
+    fi
 }
 
 update_dialog() {
