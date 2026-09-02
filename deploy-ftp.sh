@@ -18,9 +18,10 @@
 #   KOBO_USER=root
 #   KOBO_FOLDER=kobo-anki-beta
 #
-# Never touches words/ (your live flashcard progress) or logs/ on-device -
-# only the files that ship in the tarball (bin/, templates/, config/,
-# samples/, start*.sh) get uploaded/overwritten.
+# Never touches words/ (your live flashcard progress), apkg/ (files dropped
+# there for start-apkg.sh to import), or logs/ on-device - only the files
+# that ship in the tarball (bin/, templates/, config/, samples/, start*.sh)
+# get uploaded/overwritten.
 #
 # Dictionaries are the one exception to "everything lands under the app
 # folder": dict/*.zip go to /mnt/onboard/.kobo/custom-dict, which is Nickel's
@@ -62,7 +63,7 @@ cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vo
 # bin/ locally - it needs an image-support-enabled build (see README), and
 # this script won't silently overwrite a working device copy with nothing.
 [ -f bin/fbink ] && cp bin/fbink "$STAGE/bin/"
-cp start.sh start-debug.sh start-fbink.sh start-server.sh start-vocab.sh "$STAGE/"
+cp start.sh start-debug.sh start-fbink.sh start-server.sh start-vocab.sh start-apkg.sh "$STAGE/"
 cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/config/"
 # apkgimport's split_tags config - optional, most imports don't use it.
 [ -f anki-apkgimport.conf ] && cp anki-apkgimport.conf "$STAGE/config/"

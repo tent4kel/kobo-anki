@@ -69,6 +69,7 @@ Then connect the Kobo over USB and copy the files into `.adds/`, giving you this
 ├── samples/
 │   └── french.csv          ← sample deck; copy into words/ to try it
 ├── logs/                   ← created automatically at first run
+├── apkg/                   ← drop .apkg files here for start-apkg.sh to import
 └── words/                  ← flashcard CSVs go here
 ```
 
@@ -79,6 +80,7 @@ Add to `/mnt/onboard/.adds/nm/config`:
 ```
 menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
 menu_item:main:Update Vocabulary:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start-vocab.sh
+menu_item:main:Import Apkg:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start-apkg.sh
 ```
 
 ### Upgrading an existing install
@@ -605,6 +607,7 @@ kobo-vocab -print-config
 - **start-fbink.sh** — Minimal launcher, no Nickel management.
 - **start-server.sh** — Starts the web server mode.
 - **start-vocab.sh** — Standalone vocabulary lookup, runs alongside Nickel (no Nickel management needed). Shows live progress via a NickelDBus modal dialog with a Cancel button.
+- **start-apkg.sh** — Standalone apkg importer, runs alongside Nickel. Scans `apkg/` for `.apkg` files and imports each one into a deck named after the file; successfully imported files move to `apkg/imported/`.
 
 ### A note on suspending/restoring Nickel
 
