@@ -19,11 +19,6 @@ db=/mnt/onboard/.kobo/KoboReader.sqlite
 # so rather than quietly producing decks the app never shows.
 # out=words
 
-# Automatically run kobo-vocab in the background at every startup.
-# Off by default — enable once you're happy with your dictionary setup,
-# since it re-scans your Kobo's vocabulary list and dictionaries on boot.
-auto_parse=false
-
 # Card length. Both are defaults for every pair and can be overridden in a
 # [pair:xx-yy] section below.
 #   max_senses=1   senses per word; two or more render as a "- " list. A

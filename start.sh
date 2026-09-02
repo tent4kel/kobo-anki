@@ -46,46 +46,8 @@ echo "Nickel stopped (waited ${kill_wait}x250ms)" >>$LOG
 
 rm -f /tmp/nickel-hardware-status
 
-# --- Translate vocabulary (runs in background so the UI isn't blocked) ---
-AUTO_PARSE=false
-if [ -f config/anki-mywords.conf ]; then
-    val=$(grep -E '^[[:space:]]*auto_parse[[:space:]]*=' config/anki-mywords.conf | tail -1 | cut -d= -f2 | tr -d '[:space:]')
-    [ "$val" = "true" ] && AUTO_PARSE=true
-fi
-
-if [ "$AUTO_PARSE" = "true" ]; then
-    # Fast, network-free pre-check: how many new words are actually pending
-    # (see -count-new in kobo-vocab), so the startup toast can say something
-    # more useful than a generic "updating" message - and so nothing runs
-    # at all when there's genuinely nothing new to look up.
-    NEW_COUNT=$(./bin/kobo-vocab -conf config/anki-mywords.conf -count-new 2>>$LOG)
-    case "$NEW_COUNT" in
-        ''|*[!0-9]*) NEW_COUNT=0 ;; # unexpected output (crash, etc.) - fall back safely
-    esac
-
-    if [ "$NEW_COUNT" -gt 0 ]; then
-        if [ "$NEW_COUNT" -eq 1 ]; then
-            MSG="1 new word found, starting lookup..."
-        else
-            MSG="$NEW_COUNT new words found, starting lookup..."
-        fi
-        ./bin/fbink -q -m -y 10 "$MSG" 2>/dev/null
-        sleep 2 # give the e-ink screen time to actually show this before the app launch clears it
-        (
-            ./bin/kobo-vocab -conf config/anki-mywords.conf >>$LOG 2>&1
-            RC=$?
-            if [ "$RC" -eq 0 ]; then
-                ./bin/fbink -q -m -y 10 "Vocabulary updated" 2>/dev/null
-            else
-                ./bin/fbink -q -m -y 10 "Vocabulary update failed (see log)" 2>/dev/null
-            fi
-        ) &
-    else
-        echo "No new words pending, skipping kobo-vocab" >>$LOG
-    fi
-else
-    echo "auto_parse disabled in anki-mywords.conf, skipping kobo-vocab" >>$LOG
-fi
+# Vocabulary lookup is not run here - use start-vocab.sh (its own NickelMenu
+# entry) to check for and translate new words on demand.
 
 # --- Main app with crash recovery ---
 CRASH_COUNT=0

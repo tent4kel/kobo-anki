@@ -20,6 +20,7 @@ func main() {
 	dbOverride := flag.String("db", "", "override db path from config")
 	createTest := flag.Bool("create-test-db", false, "create a test KoboReader.sqlite and exit")
 	testDict := flag.String("test-dict", "", "parse a single dicthtml-*.zip and print entry count + samples, then exit")
+	countNew := flag.Bool("count-new", false, "print the number of new words pending lookup, then exit (no dict loading or network calls - used by start-vocab.sh's progress dialog before running the real lookup)")
 	printConfig := flag.Bool("print-config", false, "print the effective settings after defaults and [lang] overrides are applied, then exit")
 	flag.Parse()
 
@@ -60,6 +61,11 @@ func main() {
 	groups, totalNew, err := computeGroups(cfg, koboDB)
 	if err != nil {
 		log.Fatalf("%v", err)
+	}
+
+	if *countNew {
+		fmt.Println(totalNew)
+		return
 	}
 
 	if totalNew == 0 {

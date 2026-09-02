@@ -592,7 +592,9 @@ type langGroup struct {
 // diffs each group against its existing CSV/misses file to find words that
 // still need a lookup. This is deliberately separate from the actual
 // lookup/export loop in main(): it's the fast, dict/network-free part of a
-// run.
+// run, shared between the real run and -count-new (which needs the exact
+// same new-word count without paying for any dict loading or network
+// calls).
 func computeGroups(cfg Config, koboDB *sql.DB) (groups map[string]*langGroup, totalNew int, err error) {
 	words, err := readWordList(koboDB)
 	if err != nil {

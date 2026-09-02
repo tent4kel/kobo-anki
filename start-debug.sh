@@ -52,7 +52,8 @@ echo "Nickel stopped (waited ${kill_wait}x250ms)" >>$LOG
 rm -f /tmp/nickel-hardware-status
 start_watchdog
 
-./bin/kobo-vocab -conf config/anki-mywords.conf 2>&1 | tee -a $LOG
+# Vocabulary lookup is not run here - use start-vocab.sh (its own NickelMenu
+# entry) to check for and translate new words on demand.
 
 ./bin/fbink -c -f
 DEBUG=1 ./bin/kobo-anki-fbink 2>&1 | tee -a $LOG

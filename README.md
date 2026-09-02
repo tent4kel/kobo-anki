@@ -211,7 +211,6 @@ Vocabulary extractor settings.
 dict_dir=/mnt/onboard/.kobo/custom-dict   # where the dictionaries live
 db=/mnt/onboard/.kobo/KoboReader.sqlite
 out=words                   # output directory for generated CSVs
-auto_parse=false            # run kobo-vocab automatically in the background on startup
 max_senses=1                # senses to include per word
 max_chars=150               # cap on each card face, in visible characters
 
@@ -236,12 +235,13 @@ dictionaries from different generators, and PONS publishes a Dutch↔German dict
 Dutch↔English one — so they need different provider lists, which a per-language section had
 no way to express.
 
-When `auto_parse=true`, `start.sh` first does a fast, network-free check of how many new
-words are pending (`kobo-vocab -count-new`), then - only if there are any - launches the
-real `kobo-vocab` run in the background (so it doesn't block the flashcard UI from
-starting) and shows a brief on-screen notification ("N new words found, starting
-lookup...", then "Vocabulary updated"/"...failed"). If nothing's new, it skips the run
-entirely. When `false` (the default), you run `kobo-vocab` manually.
+`kobo-vocab` never runs automatically — `start.sh`/`start-debug.sh`/`start-fbink.sh`/
+`start-server.sh` launch straight into their app with no vocabulary step at all. Run
+**start-vocab.sh** (its own NickelMenu entry, see below) whenever you want new words looked
+up: it does a fast, network-free check of how many are pending (`kobo-vocab -count-new`),
+then - only if there are any - runs the real `kobo-vocab` lookup, showing live progress
+in a NickelDBus modal dialog (with a Cancel button) rather than blocking on a full-screen
+launcher.
 
 kobo-vocab supports both the flat Kobo dict layout (stock/official dicts) and the nested
 `<ol>/<li>` layout produced by tools like [dictgen](https://github.com/pgaskin/dictutil)
