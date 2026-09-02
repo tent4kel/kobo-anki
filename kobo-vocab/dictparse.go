@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"log"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -21,15 +23,18 @@ type dictRender struct {
 }
 
 // readShards walks a dictzip, decompressing members as needed, and hands
-// each shard's bytes to fn.
-func readShards(zipPath string, fn func(data []byte)) error {
+// each shard's bytes to fn along with its index and the total shard count -
+// so a caller with a long per-shard step (parseDict) can report progress
+// through a dictionary that has none of its own to report.
+func readShards(zipPath string, fn func(data []byte, index, total int)) error {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
 	defer zr.Close()
 
-	for _, f := range zr.File {
+	total := len(zr.File)
+	for i, f := range zr.File {
 		rc, err := f.Open()
 		if err != nil {
 			continue
@@ -51,7 +56,7 @@ func readShards(zipPath string, fn func(data []byte)) error {
 				continue
 			}
 		}
-		fn(data)
+		fn(data, i, total)
 	}
 	return nil
 }
@@ -59,7 +64,7 @@ func readShards(zipPath string, fn func(data []byte)) error {
 // sniffDict reads enough of a dictionary to identify its generator.
 func sniffDict(zipPath string) (string, error) {
 	var sample strings.Builder
-	err := readShards(zipPath, func(data []byte) {
+	err := readShards(zipPath, func(data []byte, _, _ int) {
 		if sample.Len() > 400_000 {
 			return
 		}
@@ -172,11 +177,29 @@ func describeProfile(p dictProfile) []string {
 }
 
 // parseDict loads a dictionary using a profile for structure and a
-// dictRender for presentation.
+// dictRender for presentation. A real dicthtml zip is sharded into
+// hundreds of member files (confirmed: 361-518 on the dictionaries this
+// project ships with), which gives shard index/count a fine enough grain
+// to report load progress by - the one genuinely slow, opaque step in a
+// run, and otherwise invisible until it's done. Logged in 10% steps rather
+// than per shard, so a live log-tailing UI (see start-vocab.sh) gets a
+// steady trickle of updates instead of hundreds of near-duplicate lines.
 func parseDict(zipPath string, c *compiledProfile, r dictRender) (*KoboDict, error) {
 	dict := &KoboDict{Entries: make(map[string]string), Fronts: make(map[string]string)}
 
-	err := readShards(zipPath, func(data []byte) {
+	name := filepath.Base(zipPath)
+	nextMilestone := 10
+	err := readShards(zipPath, func(data []byte, index, total int) {
+		if total > 0 {
+			pct := (index + 1) * 100 / total
+			if pct >= nextMilestone {
+				log.Printf("  loading %s: %d%%", name, pct)
+				for nextMilestone <= pct {
+					nextMilestone += 10
+				}
+			}
+		}
+
 		doc, err := html.Parse(strings.NewReader(normalizeDictHTML(string(data))))
 		if err != nil {
 			return
