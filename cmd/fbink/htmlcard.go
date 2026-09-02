@@ -168,23 +168,22 @@ func resolveDeckStyle(cssFile string) (css string, ok bool) {
 }
 
 // deckMediaResolver resolves an html card's <img> references against the
-// current deck's media directory (core.DeckMediaDir) - the same directory
+// current deck's media zip (core.DeckMediaResolver) - the same archive
 // cmd/apkgimport wrote into and archived the source .apkg alongside.
 func deckMediaResolver() htmlrender.MediaResolver {
-	mediaDir := core.DeckMediaDir(dataDir, currentDeck)
+	lookup := core.DeckMediaResolver(dataDir, currentDeck)
 	return func(src, _ string) ([]byte, bool) {
 		// An absolute path - e.g. a Kobo system font referenced from
 		// cards.css as url('/mnt/onboard/fonts/extra-kobo/KF_Literata-
 		// Regular.ttf') - is read directly, not sandboxed to the deck's
-		// own media dir. This isn't a new privilege: cards.css is a file
-		// you already have full filesystem access to edit, same as this
+		// own media. This isn't a new privilege: cards.css is a file you
+		// already have full filesystem access to edit, same as this
 		// binary itself, so referencing another file you can already read
 		// grants nothing you didn't already have.
 		if filepath.IsAbs(src) {
 			b, err := os.ReadFile(src)
 			return b, err == nil
 		}
-		b, err := os.ReadFile(filepath.Join(mediaDir, filepath.Base(src)))
-		return b, err == nil
+		return lookup(src)
 	}
 }

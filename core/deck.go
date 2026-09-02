@@ -14,11 +14,11 @@ import "log"
 var DeckHeader = []string{
 	"front", "back", "due", "stability", "difficulty",
 	"elapsed_days", "scheduled_days", "reps", "lapses", "state", "last_review",
-	"id", "format",
+	"id", "format", "tags",
 }
 
 // DeckColumns is the canonical row width (len(DeckHeader)).
-const DeckColumns = 13
+const DeckColumns = 14
 
 // Column indices, for readers that pick fields out of a raw row.
 const (
@@ -54,6 +54,14 @@ const (
 	// written before this column existed, which NormalizeRow widens to ""
 	// - exactly today's only behaviour, so old decks need no migration.
 	ColFormat
+
+	// ColTags holds a card's tags, space-separated (matching Anki's own raw
+	// note.tags representation, which cmd/apkgimport reads them from - see
+	// ankipkg.Resolved.Tags). Not consumed by anything yet: this is storage
+	// only, in preparation for tag-based filtering later. Empty for every
+	// deck written before this column existed, and for hand-written or
+	// kobo-vocab decks, which have no tags at all.
+	ColTags
 )
 
 // FormatHTML is the ColFormat value for a card whose Front/Back are

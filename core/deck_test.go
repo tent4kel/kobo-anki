@@ -108,6 +108,47 @@ func TestLoadCardsQuietOnProperHeader(t *testing.T) {
 	}
 }
 
+func TestTagsRoundTripThroughSaveAndLoad(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "d.csv")
+	in := []Card{
+		{Front: "a", Back: "b", Tags: []string{"chapter1", "verb"}},
+		{Front: "c", Back: "d"}, // no tags at all - must round-trip as empty, not [""]
+	}
+	if err := SaveCards(p, in); err != nil {
+		t.Fatalf("SaveCards: %v", err)
+	}
+	out, err := LoadCards(p)
+	if err != nil {
+		t.Fatalf("LoadCards: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("got %d cards, want 2", len(out))
+	}
+	if got := out[0].Tags; len(got) != 2 || got[0] != "chapter1" || got[1] != "verb" {
+		t.Errorf("Tags = %v, want [chapter1 verb]", got)
+	}
+	if got := out[1].Tags; len(got) != 0 {
+		t.Errorf("Tags = %v, want empty for a card with none", got)
+	}
+}
+
+func TestNormalizeRowWidensPreTagsRowWithEmptyTags(t *testing.T) {
+	// A row written before the tags column existed (13 fields) must still
+	// widen cleanly to 14, with tags coming out empty rather than the row
+	// being rejected or misaligned.
+	row := []string{"front", "back", "", "0", "0", "0", "0", "0", "0", "0", "", "id1", "html"}
+	normalized, ok := NormalizeRow(row)
+	if !ok {
+		t.Fatal("NormalizeRow rejected a valid pre-tags row")
+	}
+	if len(normalized) != DeckColumns {
+		t.Fatalf("normalized width = %d, want %d", len(normalized), DeckColumns)
+	}
+	if normalized[ColTags] != "" {
+		t.Errorf("ColTags = %q, want empty for a widened pre-tags row", normalized[ColTags])
+	}
+}
+
 func TestNewCardRowMatchesHeaderWidth(t *testing.T) {
 	if len(DeckHeader) != DeckColumns {
 		t.Fatalf("DeckHeader has %d columns, DeckColumns says %d", len(DeckHeader), DeckColumns)

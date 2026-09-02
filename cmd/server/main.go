@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"kobo-anki/core"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -116,8 +117,8 @@ func resolveCardCSS(deck, cardFace string) (css, body string) {
 	if cached, ok := styleCache[key]; ok {
 		return cached, body
 	}
-	data, err := os.ReadFile(filepath.Join(core.DeckMediaDir(dataDir, deck), cssFile))
-	if err != nil {
+	data, ok := core.DeckMediaResolver(dataDir, deck)(cssFile)
+	if !ok {
 		return "", body // unstyled, not a failed render
 	}
 	css = string(data)
@@ -390,9 +391,9 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // mediaHandler serves an apkg-imported deck's media (images, referenced by
-// core.DeckMediaDir(dataDir, deck)) at /media/<deck>/<file>. filepath.Base
-// strips any directory components from the requested file, so a request
-// can't escape the deck's media directory.
+// core.DeckMediaZip(dataDir, deck)) at /media/<deck>/<file>. filepath.Base
+// (inside core.DeckMediaResolver) strips any directory components from the
+// requested file, so a request can't escape the deck's media zip.
 func mediaHandler(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/media/")
 	deck, file, ok := strings.Cut(rest, "/")
@@ -400,7 +401,22 @@ func mediaHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join(core.DeckMediaDir(dataDir, deck), filepath.Base(file)))
+	data, ok := core.DeckMediaResolver(dataDir, deck)(file)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	// Media is immutable once imported (a re-import writes a whole new zip
+	// rather than editing entries in place), so it's always safe to let the
+	// browser cache it indefinitely instead of re-requesting it on every
+	// card view. Unlike http.ServeFile (what this replaced), there's no
+	// ETag/If-None-Match/Range support here - nothing here needs it, since
+	// these are small flashcard images, not video.
+	if ct := mime.TypeByExtension(filepath.Ext(file)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Write(data)
 }
 
 // koboFontsHandler serves the Kobo's own bundled fonts directly from their

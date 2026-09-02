@@ -1,6 +1,7 @@
 package core
 
 import (
+	"archive/zip"
 	"bufio"
 	"io"
 	"os"
@@ -150,6 +151,10 @@ type Card struct {
 	Lapses        uint64
 	State         fsrs.State
 	LastReview    time.Time
+
+	// Tags is empty for every card except an apkg import (see ColTags) -
+	// not consumed by anything yet, stored in preparation for filtering.
+	Tags []string
 }
 
 // Key is the card's lookup identity: its ID when it has one, otherwise its
@@ -233,14 +238,55 @@ func DeckCSVPath(dataDir, deckName string) string {
 	return filepath.Join(dataDir, deckName+".csv")
 }
 
-// DeckMediaDir is where a deck's referenced media (images, and for an
-// apkg-imported deck the archived source .apkg itself) lives on disk.
-// cmd/apkgimport writes into it, htmlrender.Container's MediaResolver and
-// cmd/server's static file route both read from it - one definition so the
-// three agree, the same reason DeckCSVPath exists as a shared helper rather
-// than three ad hoc filepath.Join calls.
-func DeckMediaDir(dataDir, deckName string) string {
-	return filepath.Join(dataDir, deckName+".media")
+// DeckMediaZip is where a deck's referenced media (images, per-model
+// stylesheets, and for an apkg-imported deck the archived source .apkg
+// itself) lives on disk: one uncompressed (zip.Store) zip per deck, rather
+// than loose files in a directory the Kobo's own content scanner (and,
+// apparently, Dropbox sync) can see individually. cmd/apkgimport writes it,
+// DeckMediaResolver and cmd/server's static file route both read from it -
+// one definition so all three agree, the same reason DeckCSVPath exists as
+// a shared helper rather than three ad hoc filepath.Join calls.
+func DeckMediaZip(dataDir, deckName string) string {
+	return filepath.Join(dataDir, deckName+".media.zip")
+}
+
+// DeckMediaResolver returns a lookup for one deck's media zip (see
+// DeckMediaZip): given a name - an <img> src or CSS url(), any directory
+// components ignored via filepath.Base, matching how a single flat media
+// directory used to be resolved - it returns that entry's raw bytes. ok is
+// false for a deck with no media at all (the common case: a hand-written or
+// kobo-vocab deck has no zip to open), a missing entry, or a corrupt zip -
+// none of those are errors worth surfacing, matching how a missing loose
+// file behaved before this.
+//
+// Opens and closes the zip fresh on every call rather than keeping a reader
+// alive across calls: a card face references at most a handful of media
+// files, so the repeated central-directory parse this costs is negligible
+// next to actually rendering the card, and it means there is no open-file
+// lifetime to manage.
+func DeckMediaResolver(dataDir, deckName string) func(name string) ([]byte, bool) {
+	path := DeckMediaZip(dataDir, deckName)
+	return func(name string) ([]byte, bool) {
+		zr, err := zip.OpenReader(path)
+		if err != nil {
+			return nil, false
+		}
+		defer zr.Close()
+		base := filepath.Base(name)
+		for _, f := range zr.File {
+			if f.Name != base {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return nil, false
+			}
+			defer rc.Close()
+			data, err := io.ReadAll(rc)
+			return data, err == nil
+		}
+		return nil, false
+	}
 }
 
 // CardFromRow builds a Card from one raw CSV row (widening it via
@@ -261,6 +307,7 @@ func CardFromRow(row []string) (c Card, ok bool) {
 		Format:     normalized[ColFormat],
 		Due:        parseTime(normalized[ColDue]),
 		LastReview: parseTime(normalized[ColLastReview]),
+		Tags:       strings.Fields(normalized[ColTags]),
 	}
 	c.Stability, _ = strconv.ParseFloat(normalized[ColStability], 64)
 	c.Difficulty, _ = strconv.ParseFloat(normalized[ColDifficulty], 64)
@@ -326,6 +373,7 @@ func SaveCards(csvFile string, cards []Card) error {
 				formatTime(c.LastReview),
 				c.ID,
 				c.Format,
+				strings.Join(c.Tags, " "),
 			})
 		}
 		w.Flush()

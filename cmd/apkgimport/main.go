@@ -10,9 +10,11 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -228,32 +230,19 @@ func slugify(s string) string {
 }
 
 func importGroup(deckName string, resolved []ankipkg.Resolved, media map[string][]byte, styles map[string]string, apkgPath, dataDir string) error {
-	mediaDir := core.DeckMediaDir(dataDir, deckName)
-	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
-		return fmt.Errorf("creating %s: %w", mediaDir, err)
-	}
-	for name, data := range media {
-		safe := ankipkg.SanitizeFilename(name)
-		if safe == "" || safe == "." {
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(mediaDir, safe), data, 0o644); err != nil {
-			return fmt.Errorf("writing media %s: %w", safe, err)
-		}
+	mediaZip := core.DeckMediaZip(dataDir, deckName)
+	preservedStyles := readExistingStyles(mediaZip)
+	if err := writeMediaZip(mediaZip, media, styles, preservedStyles, apkgPath); err != nil {
+		return fmt.Errorf("writing media: %w", err)
 	}
 
-	// Archive the source .apkg itself next to its media - the resolve-at-
-	// import approach's insurance policy: if the template engine later
-	// gains a capability it doesn't have today, this deck can be re-run
-	// through apkgimport from its own archived source, without the user
-	// needing to have kept the original file anywhere.
-	if err := archiveSource(apkgPath, filepath.Join(mediaDir, "source.apkg")); err != nil {
-		return fmt.Errorf("archiving source apkg: %w", err)
-	}
-
-	if err := writeStylesIfMissing(mediaDir, styles); err != nil {
-		return fmt.Errorf("writing stylesheets: %w", err)
-	}
+	// A deck imported before media moved into a zip (see writeMediaZip) left
+	// a loose "<deck>.media/" directory sitting next to it - exactly the
+	// individually-scannable files the zip exists to avoid. Clean it up on
+	// re-import so the two don't end up coexisting; best-effort, since
+	// leaving a stale directory behind is a cosmetic problem, not a reason
+	// to fail an otherwise-successful import.
+	os.RemoveAll(filepath.Join(dataDir, deckName+".media"))
 
 	existing, err := core.LoadCards(core.DeckCSVPath(dataDir, deckName))
 	if err != nil && !os.IsNotExist(err) {
@@ -276,16 +265,18 @@ func importGroup(deckName string, resolved []ankipkg.Resolved, media map[string]
 
 		if prior, ok := byID[id]; ok {
 			// Re-import: keep review history, only refresh the rendered
-			// faces in case the source .apkg changed.
+			// faces (and tags) in case the source .apkg changed.
 			prior.Front = front
 			prior.Back = back
 			prior.Format = core.FormatHTML
+			prior.Tags = r.Tags
 			cards = append(cards, prior)
 			continue
 		}
 
 		row := core.NewCardRow(id, front, back)
 		row[core.ColFormat] = core.FormatHTML
+		row[core.ColTags] = strings.Join(r.Tags, " ")
 		c, ok := core.CardFromRow(row)
 		if !ok {
 			return fmt.Errorf("building card %s: row rejected by CardFromRow", id)
@@ -297,7 +288,7 @@ func importGroup(deckName string, resolved []ankipkg.Resolved, media map[string]
 		return fmt.Errorf("saving deck: %w", err)
 	}
 
-	fmt.Printf("imported %d card(s) into %s (media: %s)\n", len(cards), core.DeckCSVPath(dataDir, deckName), mediaDir)
+	fmt.Printf("imported %d card(s) into %s (media: %s)\n", len(cards), core.DeckCSVPath(dataDir, deckName), mediaZip)
 	return nil
 }
 
@@ -312,31 +303,104 @@ func refCard(styleSlug, body string) string {
 	return "<!--css:" + styleSlug + `--><div class="card">` + body + "</div>"
 }
 
-// writeStylesIfMissing writes each distinct model's CSS to its own
-// style-<slug>.css in mediaDir, but only the first time a deck is
-// imported: a deck's CSS is meant to be editable per-deck after that (drop
-// a stylesheet into a text editor and adjust it), so a re-import must never
-// clobber a file the user has since hand-edited. Delete the file to reset
-// it back to the deck's own original CSS on the next import.
-func writeStylesIfMissing(mediaDir string, styles map[string]string) error {
-	for slug, css := range styles {
-		path := filepath.Join(mediaDir, "style-"+slug+".css")
-		if _, err := os.Stat(path); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.WriteFile(path, []byte(css), 0o644); err != nil {
-			return err
-		}
+// readExistingStyles reads every style-*.css entry already in mediaZip (if
+// it exists), keyed by the same slug writeMediaZip uses, so a user's
+// hand-edited stylesheet survives re-importing the same deck - a deck's CSS
+// is meant to be editable per-deck after the first import (drop the entry's
+// contents into a text editor and adjust it), so a re-import must never
+// clobber one the user has since hand-edited. A missing or unreadable zip
+// (including a pre-zip "<deck>.media/" directory, which isn't a zip at all)
+// yields no preserved styles - the fresh CSS from this import is used for
+// every model instead, exactly as a first import would. Delete an entry
+// (or the whole zip) to reset a model back to the deck's own original CSS
+// on the next import.
+func readExistingStyles(mediaZip string) map[string]string {
+	preserved := make(map[string]string)
+	zr, err := zip.OpenReader(mediaZip)
+	if err != nil {
+		return preserved
 	}
-	return nil
+	defer zr.Close()
+	for _, f := range zr.File {
+		slug, ok := strings.CutPrefix(f.Name, "style-")
+		if !ok {
+			continue
+		}
+		slug, ok = strings.CutSuffix(slug, ".css")
+		if !ok {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		preserved[slug] = string(data)
+	}
+	return preserved
 }
 
-func archiveSource(srcPath, dstPath string) error {
-	data, err := os.ReadFile(srcPath)
+// writeMediaZip writes deckName's whole media archive in one pass: the
+// apkg's own media files (always refreshed - images aren't meant to be
+// hand-edited the way a model's CSS is), one style-<slug>.css per model
+// (preservedStyles wins over styles when both have the same slug, so a
+// hand-edited stylesheet survives re-importing the same deck), and the
+// archived source .apkg - the resolve-at-import approach's insurance
+// policy: if the template engine later gains a capability it doesn't have
+// today, this deck can be re-run through apkgimport from its own archived
+// source, without the user needing to have kept the original file anywhere.
+//
+// Stored uncompressed (zip.Store): the point of bundling media into an
+// archive at all is to stop it being individually visible to the Kobo's own
+// content scanner (and, it turns out, Dropbox sync) - not to save space -
+// so paying CPU to compress it, and again to decompress it on every read,
+// buys nothing.
+func writeMediaZip(path string, media map[string][]byte, styles, preservedStyles map[string]string, apkgPath string) error {
+	return core.WriteFileAtomic(path, 0o644, func(w io.Writer) error {
+		zw := zip.NewWriter(w)
+
+		for name, data := range media {
+			safe := ankipkg.SanitizeFilename(name)
+			if safe == "" || safe == "." {
+				continue
+			}
+			if err := writeStoredEntry(zw, safe, data); err != nil {
+				return fmt.Errorf("writing media %s: %w", safe, err)
+			}
+		}
+
+		for slug, css := range styles {
+			if preserved, ok := preservedStyles[slug]; ok {
+				css = preserved
+			}
+			if err := writeStoredEntry(zw, "style-"+slug+".css", []byte(css)); err != nil {
+				return fmt.Errorf("writing style %s: %w", slug, err)
+			}
+		}
+
+		srcData, err := os.ReadFile(apkgPath)
+		if err != nil {
+			return fmt.Errorf("reading source apkg: %w", err)
+		}
+		if err := writeStoredEntry(zw, "source.apkg", srcData); err != nil {
+			return fmt.Errorf("archiving source apkg: %w", err)
+		}
+
+		return zw.Close()
+	})
+}
+
+// writeStoredEntry adds name to zw uncompressed - zw.Create always picks
+// Deflate, so this goes through CreateHeader instead to force zip.Store.
+func writeStoredEntry(zw *zip.Writer, name string, data []byte) error {
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dstPath, data, 0o644)
+	_, err = w.Write(data)
+	return err
 }
