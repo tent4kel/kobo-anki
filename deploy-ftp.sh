@@ -1,7 +1,10 @@
 #!/bin/sh
 # Build the ARM binaries and push a full kobo-anki install to a Kobo over
 # FTP, file by file (no remote shell/tar-extraction needed - just plain
-# FTP STOR, which is all stock Kobo FTP servers support).
+# FTP STOR, which is all stock Kobo FTP servers support). For a
+# no-network-access install (or a release to hand to someone else), see
+# build-release.sh instead - same contents, packaged as a zip to extract
+# and copy over USB/SD card.
 #
 # Usage:
 #   ./deploy-ftp.sh <kobo-ip> [target-folder]

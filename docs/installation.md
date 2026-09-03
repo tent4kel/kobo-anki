@@ -28,12 +28,21 @@ This cross-compiles four ARM binaries into `bin/`:
 
 ## Installing on the device
 
-Copy the `.example` config files and rename them (drop the `.example` suffix), then edit
-each to match your setup — see the per-module docs linked from the [README](../README.md)
-for what each file's settings do.
+There's no boot-time installer here — Kobo's own convention for that is a `KoboRoot.tgz`
+dropped in `.kobo/`, which Nickel's update-check extracts onto the root filesystem as root.
+This app doesn't use that; it's a plain `.adds/`-folder app like any other NickelMenu-launched
+homebrew, so nothing runs until you add a NickelMenu entry for it yourself (see below).
 
-Then copy the files onto the device (however you prefer — USB mass storage, FTP, `scp`
-if your device has an SSH server enabled) into `.adds/`, giving you this layout:
+**Fastest path**: `./build-release.sh` builds the ARM binaries and packages them, the
+`.example` configs (renamed, ready to edit), the bundled font, and everything else needed
+into `kobo-anki-<version>.zip` — extract it and copy the `kobo-anki/` folder straight into
+`.adds/` (USB mass storage or an SD card reader, no FTP or shell access needed).
+
+**By hand**: copy the `.example` config files and rename them (drop the `.example` suffix),
+then edit each to match your setup — see the per-module docs linked from the
+[README](../README.md) for what each file's settings do. Then copy the files onto the device
+(however you prefer — USB mass storage, FTP, `scp` if your device has an SSH server enabled)
+into `.adds/`, giving you this layout:
 
 ```
 /mnt/onboard/.adds/kobo-anki/
