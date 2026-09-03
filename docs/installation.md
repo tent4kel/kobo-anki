@@ -67,7 +67,9 @@ if your device has an SSH server enabled) into `.adds/`, giving you this layout:
 
 ### NickelMenu
 
-Add to `/mnt/onboard/.adds/nm/config` (or `nm.conf`, depending on your NickelMenu install):
+NickelMenu reads every file placed in `/mnt/onboard/.adds/nm/`, regardless of filename —
+add these lines to any file there (a new one, or an existing one you already use, such as
+`config` or `nm.conf`):
 
 ```
 menu_item:main:Kobo Anki:cmd_spawn:quiet:/mnt/onboard/.adds/kobo-anki/start.sh
