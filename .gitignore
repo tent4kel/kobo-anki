@@ -49,3 +49,8 @@ deploy.conf
 
 # API credentials
 APIs/
+
+# Agent-session planning artifacts (specs/plans from brainstorming/writing-plans
+# skills) - working notes for the session that produced a change, not
+# documentation of the change itself.
+docs/superpowers/
