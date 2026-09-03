@@ -60,8 +60,9 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/bin" "$STAGE/templates" "$STAGE/config"
 cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vocab "$STAGE/bin/"
 # fbink itself is only uploaded if you already have one built/placed in
-# bin/ locally - it needs an image-support-enabled build (see README), and
-# this script won't silently overwrite a working device copy with nothing.
+# bin/ locally - it needs an image-support-enabled build (see
+# docs/installation.md), and this script won't silently overwrite a working
+# device copy with nothing.
 [ -f bin/fbink ] && cp bin/fbink "$STAGE/bin/"
 cp start.sh start-debug.sh start-fbink.sh start-server.sh start-vocab.sh start-apkg.sh "$STAGE/"
 cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/config/"
