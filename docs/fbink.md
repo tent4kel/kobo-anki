@@ -19,7 +19,8 @@ line_height=1.0             # multiplier on the font's natural line height
 block_spacing=0.5           # extra line heights after a paragraph or list item
 ligatures=true              # draw the font's own fi/fl/ff/ffi/ffl ligatures
 margin=0                    # pixels inset around the front/back card content area
-darkmode=false
+darkmode=false               # startup default only - the decks screen's own "Dark Mode"
+                              # button overrides this at runtime, see "On-device settings"
 touch_cooldown=300
 
 # Optional: explicit bold/italic files for Markdown emphasis in card text.
@@ -37,6 +38,26 @@ touch_cooldown=300
 # size_card=32
 # line_height=1.3
 ```
+
+## On-device settings
+
+Two things are toggled from the UI itself rather than by editing config files, and persist
+across relaunches in their own app-owned files under `config/` (not `words/`, which is the
+deck-CSV directory the Kobo's own content scanner watches):
+
+- **Dark Mode** - the button in the decks screen's action zone (where a global reverse
+  toggle used to be). Global, applies to every deck; flips `darkmode` for this run and
+  writes `config/state.json`. The `darkmode` key in `anki-fbink.conf` (including a
+  `[deck:NAME]` override) only sets the startup default before this is read.
+- **Per-deck reverse and tag filter** - tap "Edit" on a deck's row in the decks screen to
+  open that deck's settings: a Reverse toggle (swaps front/back for that deck only) and a
+  paged list of every tag used by its cards (the CSV's `tags` column, space-separated,
+  matching Anki's own `note.tags` - see [core](core.md)), each toggled on/off. A deck with
+  one or more tags selected shows only cards carrying at least one of them (OR, not AND)
+  when reviewed, and its name in the decks list grows the selected tags in parentheses,
+  e.g. `french (noun, verb)` - truncated with `…` if it doesn't fit the row, dropping back
+  to the bare deck name if even that doesn't fit. Persisted to
+  `config/decksettings/<deck>.json`, one file per deck that's been configured.
 
 ## Rendering architecture
 

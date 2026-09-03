@@ -10,7 +10,9 @@ UIs read and write.
 
 ```ini
 data_dir=words              # directory containing flashcard CSVs
-reverse=false               # swap front/back
+reverse=false               # swap front/back - the fbink UI's default for a deck with no
+                             # per-deck override yet (see docs/fbink.md); the server UI has
+                             # its own independent per-request reverse toggle
 request_retention=0.9       # FSRS target retention (0.0-1.0)
 maximum_interval=36500      # max days between reviews
 enable_short_term=true      # learning steps, see below

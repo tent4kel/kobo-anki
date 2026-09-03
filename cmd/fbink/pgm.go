@@ -28,12 +28,37 @@ func encodePGM(img *image.Gray) []byte {
 	return out
 }
 
+// invertGray returns a copy of img with every pixel inverted (255-v),
+// leaving img itself untouched.
+func invertGray(img *image.Gray) *image.Gray {
+	out := image.NewGray(img.Bounds())
+	for i, v := range img.Pix {
+		out.Pix[i] = 255 - v
+	}
+	return out
+}
+
 // flushScreen encodes the canvas, blits it with a single fbink call, and
 // triggers a single refresh - replacing fbinkRefresh's old role at the end
 // of every draw*Screen function, where each screen used to already be
 // composed of many separate fbink CLI subprocess calls.
+//
+// Dark mode inverts the buffer here, in software, rather than asking fbink
+// to do it at blit time via "-H"/--nightmode: real-device testing showed
+// nightmode has no visible effect on this panel (a documented possibility -
+// FBInk's own CLI reference: "-H ... may be ignored on some specific
+// devices where it is known to be or have been unstable") - everything
+// rendered in normal polarity except the one button drawn dark by its own
+// on-state fill, which was never dark-mode-aware to begin with. Inverting
+// the composed image ourselves works regardless of EPDC support, and -H is
+// deliberately not sent at all: combined with our own inversion, a device
+// where nightmode *does* work would invert twice and cancel out.
 func flushScreen() {
-	data := encodePGM(canvas.Img)
+	img := canvas.Img
+	if cfg.DarkMode {
+		img = invertGray(img)
+	}
+	data := encodePGM(img)
 
 	tmp, err := os.CreateTemp("", "kobo-anki-*.pgm")
 	if err != nil {
@@ -54,9 +79,6 @@ func flushScreen() {
 	tmp.Close()
 
 	args := []string{"-g", "file=" + tmp.Name()}
-	if cfg.DarkMode {
-		args = append(args, "-H")
-	}
 	if out, err := exec.Command(fbinkPath, args...).CombinedOutput(); err != nil && debug {
 		fmt.Printf("fbink blit error: %v, output: %s\n", err, string(out))
 	}

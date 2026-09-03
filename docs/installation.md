@@ -55,7 +55,9 @@ if your device has an SSH server enabled) into `.adds/`, giving you this layout:
 │   ├── anki-mywords.conf
 │   ├── cacert.pem          ← needed for the online dictionary providers
 │   ├── cards.css           ← shared styling for html/apkg cards
-│   └── APIs/               ← provider credentials, only if you use them
+│   ├── APIs/               ← provider credentials, only if you use them
+│   ├── state.json          ← created automatically: dark mode, toggled on-device
+│   └── decksettings/       ← created automatically: per-deck reverse/tag-filter choices
 ├── dict/                   ← optional: dicthtml-*.zip dictionaries kept beside the app
 ├── templates/              ← only needed for server mode
 ├── samples/

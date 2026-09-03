@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/open-spaced-repetition/go-fsrs/v3"
+	xfont "golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -189,6 +190,40 @@ func drawButtonDisabled(r Rect, label string, font FontType, size int) {
 	fbinkTextRect(r, label, font, size, "GRAYB", AlignCenter, true)
 }
 
+// drawToggleButton draws a button whose fill shows its own on/off state -
+// dark fill with light text when on, the normal drawButton look when off -
+// instead of swapping its label. Used wherever a tap should be its own
+// feedback (dark mode, per-deck reverse, each tag row): the fill flips the
+// instant it's tapped, no separate confirmation needed.
+func drawToggleButton(id string, r Rect, label string, font FontType, size int, on bool) {
+	sceneAdd(id, r)
+	if on {
+		fbinkFillRect(r, "GRAY3")
+		fbinkTextRect(r, label, font, size, "WHITE", AlignCenter, true)
+	} else {
+		fbinkFillRect(r, "GRAYD")
+		fbinkTextRect(r, label, font, size, "", AlignCenter, true)
+	}
+}
+
+// drawOptionRow draws one row of the deck-settings screen: plain left-
+// aligned text (state description or a tag name, same look as a deck-list
+// row's name) on the left, and a small state button on the right (same
+// proportions as the decks screen's own "Edit" button) whose label is
+// stateText - the caller passes "Yes"/"No" for the reverse toggle and
+// "On"/"Off" for a tag, matching how each reads best. labelSize sizes only
+// the left-hand text; the button always renders at activeStyle.SizeMenu/2,
+// same as every other button in the app (Edit, Prev/Next, Back, Quit) -
+// buttons don't scale with the label next to them.
+func drawOptionRow(id string, full Rect, label, stateText string, font FontType, labelSize int) {
+	btnW := full.W * 15 / 100
+	textRect := Rect{full.X, full.Y, full.W - btnW, full.H}
+	fbinkTextRect(Rect{textRect.X + screenW/20, textRect.Y, textRect.W - screenW/20, textRect.H}, label, font, labelSize, "", AlignLeft, true)
+
+	btnRect := Rect{full.X + full.W - btnW, full.Y, btnW, full.H}
+	drawButton(id, shrinkV(btnRect, 70), stateText, font, activeStyle.SizeMenu/2)
+}
+
 // drawLabel draws centered text in a rect (no border, no touch target),
 // top-aligned - unchanged from before centerV existed, since none of its
 // current callers (title, "Done!" messages) were reported as needing
@@ -210,6 +245,7 @@ const (
 	ScreenFront
 	ScreenBack
 	ScreenDone
+	ScreenDeckSettings
 )
 
 type FontType int
@@ -243,6 +279,23 @@ var (
 
 	deckPage     int
 	decksPerPage int
+
+	// reviewCards is the (possibly tag-filtered) slice openDeck built the
+	// current session's queue from - Session itself always resolves/mutates
+	// against the full cards slice (see openDeck), this is only needed again
+	// if a study-ahead sitting is started later in the same deck.
+	reviewCards []core.Card
+
+	// defaultReverse is coreCfg.Reverse, captured once in main() - the
+	// fallback for a deck with no config/decksettings/<deck>.json yet.
+	defaultReverse bool
+
+	// Deck-settings screen (ScreenDeckSettings) state, set by openDeckSettings.
+	settingsDeck string
+	deckTags     []string
+	selectedTags map[string]bool
+	tagPage      int
+	tagsPerPage  int
 
 	touchMaxX = 1440
 	touchMaxY = 1020
@@ -899,8 +952,54 @@ func openDeck(name string) {
 	currentDeck = name
 	csvFile = core.DeckCSVPath(dataDir, name)
 	cards, _ = core.LoadCards(csvFile)
-	session = core.NewSession(cards, sessionCfg)
+
+	var ds deckSettingsData
+	if !loadJSONFile(deckSettingsPath(name), &ds) {
+		ds.Reverse = defaultReverse
+	}
+	reverseMode = ds.Reverse
+
+	// The session's queue is built from the filtered subset, but Session
+	// resolves/mutates cards by key (see core.Session), so Current/Rate
+	// always take the full cards slice - that's what gets saved.
+	reviewCards = core.FilterByTags(cards, ds.Tags)
+	session = core.NewSession(reviewCards, sessionCfg)
 	currentCard = session.Current(cards)
+}
+
+// openDeckSettings loads the deck's persisted reverse/tag-filter choice (or
+// defaultReverse and no filter, if it has none yet) into the
+// ScreenDeckSettings globals, and computes the deck's tag list fresh from
+// its CSV so a tag added since the last visit shows up.
+func openDeckSettings(deck string) {
+	settingsDeck = deck
+	tagPage = 0
+
+	c, _ := core.LoadCards(core.DeckCSVPath(dataDir, deck))
+	deckTags = uniqueSortedTags(c)
+
+	var ds deckSettingsData
+	if !loadJSONFile(deckSettingsPath(deck), &ds) {
+		ds.Reverse = defaultReverse
+	}
+	reverseMode = ds.Reverse
+
+	selectedTags = make(map[string]bool, len(ds.Tags))
+	for _, t := range ds.Tags {
+		selectedTags[t] = true
+	}
+}
+
+// saveDeckSettings persists the ScreenDeckSettings globals for settingsDeck -
+// called after every toggle so a mid-session crash/reboot doesn't lose it.
+func saveDeckSettings() {
+	var tags []string
+	for _, t := range deckTags {
+		if selectedTags[t] {
+			tags = append(tags, t)
+		}
+	}
+	saveJSONFile(deckSettingsPath(settingsDeck), deckSettingsData{Reverse: reverseMode, Tags: tags})
 }
 
 func displayFront() string {
@@ -926,12 +1025,24 @@ func drawDecksScreen() {
 	sceneClear()
 	canvas.Clear(0xFF)
 
+	// gap/vgap are the standard spacing unit for this screen: gap for
+	// horizontal gaps (including the left/right margin from the screen
+	// edges), vgap (half of gap) for vertical ones - shared by the action
+	// zone below and the deck-row area above it, so both align to the same
+	// margin instead of the rows running edge-to-edge while only the
+	// buttons beneath them are inset.
+	gap := screenW / 30
+	vgap := gap / 2
+
 	// Title (with top margin)
 	topMargin := screenH * 5 / 100
 	titleRect := Rect{navRect.X, topMargin, navRect.W, navRect.H + screenH*8/100}
 	drawLabel(titleRect, "Kobo Anki", FontMenu, activeStyle.SizeTitle, "")
 
-	// Deck list area: below title, above action
+	// Deck list area: below title, above action - inset by gap/2, the same
+	// margin the action zone uses, so deck rows line up with Prev/Next/Dark
+	// Mode/Quit rather than running to the screen edges.
+	rowArea := insetHV(contentRect, gap/2, 0)
 	deckAreaTop := titleRect.Y + titleRect.H
 	deckAreaH := actionRect.Y - deckAreaTop
 	deckRowH := screenH * 7 / 100
@@ -960,26 +1071,53 @@ func drawDecksScreen() {
 		end = len(decks)
 	}
 
+	editW := rowArea.W * 15 / 100
 	for i, d := range decks[start:end] {
-		r := Rect{contentRect.X, deckAreaTop + i*deckRowH, contentRect.W, deckRowH}
+		full := Rect{rowArea.X, deckAreaTop + i*deckRowH, rowArea.W, deckRowH}
+		row := Rect{full.X, full.Y, full.W - editW, full.H}
 		id := fmt.Sprintf("deck-%d", start+i)
-		sceneAdd(id, r)
+		sceneAdd(id, row)
+
+		editRect := Rect{full.X + full.W - editW, full.Y, editW, full.H}
+		drawButton(fmt.Sprintf("deck-settings-%d", start+i), shrinkV(editRect, 70), "Edit", FontMenu, activeStyle.SizeMenu/2)
 
 		path := core.DeckCSVPath(dataDir, d)
 		c, _ := core.LoadCards(path)
+
+		var ds deckSettingsData
+		loadJSONFile(deckSettingsPath(d), &ds)
+		if len(ds.Tags) > 0 {
+			c = core.FilterByTags(c, ds.Tags)
+		}
 		// The real backlog, deliberately - not just what the pool would hand
 		// over first. The pool paces how fast unseen cards trickle into a
 		// sitting; it does not shrink the work waiting, so it does not get
 		// to rewrite the number that says where the deck actually stands.
 		due := core.CountDueCards(c)
 
-		// Deck name on the left, due count in gray on the right
-		nameRect := Rect{r.X + screenW/20, r.Y, r.W / 2, r.H}
-		fbinkTextRect(nameRect, d, FontMenu, activeStyle.SizeMenu*3/4, "", AlignLeft, true)
+		// Deck name (with its selected tags, truncated to fit) on the left,
+		// due count in gray on the right. Name gets 70% of the row, not a
+		// 50/50 split - "N due" never needs more than a fraction of the
+		// remaining 30%, and at real device font sizes even one short tag
+		// annotation doesn't fit in half the row (confirmed via rendered
+		// screenshots: "french (noun, verb)" measures ~493px against a
+		// ~403px 50/50 column, so truncateTagAnnotation always fell back to
+		// the bare name - this alone is why 70/30 replaces it).
+		nameRect := Rect{row.X + screenW/20, row.Y, row.W*70/100 - screenW/20, row.H}
+		resolve := makeFaceResolver(FontMenu, activeStyle.SizeMenu*5/8)
+		measure := func(s string) fixed.Int26_6 {
+			rf, err := resolve(StyleRegular)
+			if err != nil {
+				return 0
+			}
+			return xfont.MeasureString(rf.Face, s)
+		}
+		name := truncateTagAnnotation(d, ds.Tags, fixed.I(nameRect.W), measure)
+		fbinkTextRect(nameRect, name, FontMenu, activeStyle.SizeMenu*5/8, "", AlignLeft, true)
 
-		dueRect := Rect{r.X, r.Y, r.W - screenW/20, r.H}
+		dueRect := Rect{row.X, row.Y, row.W - screenW/20, row.H}
 		dueText := fmt.Sprintf("%d due", due)
-		fbinkTextRect(dueRect, dueText, FontMenu, activeStyle.SizeMenu*3/4, "GRAY8", AlignRight, true)
+		fbinkTextRect(dueRect, dueText, FontMenu, activeStyle.SizeMenu*5/8, "GRAY8", AlignRight, true)
 	}
 
 	// Action zone: 2x2 grid — prev/next on top row, reverse/exit on bottom row.
@@ -987,8 +1125,6 @@ func drawDecksScreen() {
 	// above/below elements) is half its matching horizontal one; gap
 	// itself is unchanged and still used for horizontal spacing (between
 	// side-by-side buttons, and the zone's own left/right inset).
-	gap := screenW / 30
-	vgap := gap / 2
 	actionInner := insetHV(actionRect, gap/2, vgap/2)
 	rows := splitV(actionInner, 2, vgap)
 	topCols := splitH(rows[0], 2, gap)
@@ -1012,12 +1148,109 @@ func drawDecksScreen() {
 	// 	drawLabel(rows[0], indicator, FontMenu, activeStyle.SizeMenu/2, "GRAY8")
 	// }
 
-	reverseLabel := "Reverse"
-	if reverseMode {
-		reverseLabel = "Normal"
-	}
-	drawButton("reverse", shrinkV(botCols[0], 80), reverseLabel, FontMenu, activeStyle.SizeMenu/2)
+	drawToggleButton("darkmode", shrinkV(botCols[0], 80), "Dark Mode", FontMenu, activeStyle.SizeMenu/2, cfg.DarkMode)
 	drawButton("exit", shrinkV(botCols[1], 80), "Quit", FontMenu, activeStyle.SizeMenu/2)
+
+	flushScreen()
+	drainTouch()
+}
+
+// drawDeckSettingsScreen shows one deck's reverse toggle and its paged tag
+// list, each row in the decks screen's own label-plus-button style (see
+// drawOptionRow) so this screen reads as more of the same list rather than
+// a different kind of control. Reuses the same chrome and Prev/Next paging
+// idiom as drawDecksScreen so scrolling never needs to exist.
+func drawDeckSettingsScreen() {
+	activeStyle = cfg
+	sceneClear()
+	canvas.Clear(0xFF)
+
+	topMargin := screenH * 5 / 100
+	titleRect := Rect{navRect.X, topMargin, navRect.W, navRect.H + screenH*8/100}
+	drawLabel(titleRect, settingsDeck, FontMenu, activeStyle.SizeTitle, "")
+
+	gap := screenW / 30
+	vgap := gap / 2
+
+	// Same gap/2 margin as drawDecksScreen and this screen's own action
+	// zone below - the reverse toggle and every tag row line up with
+	// Prev/Next/Back instead of running to the screen edges.
+	rowArea := insetHV(contentRect, gap/2, 0)
+
+	reverseRect := Rect{rowArea.X, titleRect.Y + titleRect.H, rowArea.W, screenH * 7 / 100}
+	reverseState := "No"
+	if reverseMode {
+		reverseState = "Yes"
+	}
+	drawOptionRow("reverse", reverseRect, "Reverse card sides:", reverseState, FontMenu, activeStyle.SizeMenu*5/8)
+
+	headerRect := Rect{rowArea.X, reverseRect.Y + reverseRect.H, rowArea.W, screenH * 5 / 100}
+	fbinkTextRect(Rect{headerRect.X + screenW/20, headerRect.Y, headerRect.W - screenW/20, headerRect.H}, "Filter by tags:", FontMenu, activeStyle.SizeMenu*5/8, "", AlignLeft, true)
+
+	// Tag rows indent from the left, under "Filter by tags:" - the right
+	// edge stays put so their On/Off buttons still line up with Reverse's
+	// Yes/No button and Prev/Next/Back below; only the left edge moves in,
+	// which is what reads as "child of the header" rather than a sibling.
+	tagRowArea := Rect{rowArea.X + gap, rowArea.Y, rowArea.W - gap, rowArea.H}
+
+	tagAreaTop := headerRect.Y + headerRect.H
+	tagAreaH := actionRect.Y - tagAreaTop
+	tagRowH := screenH * 7 / 100
+	if tagRowH > 0 {
+		tagsPerPage = tagAreaH / tagRowH
+	}
+	if tagsPerPage < 1 {
+		tagsPerPage = 1
+	}
+
+	totalPages := (len(deckTags) + tagsPerPage - 1) / tagsPerPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if tagPage >= totalPages {
+		tagPage = totalPages - 1
+	}
+	if tagPage < 0 {
+		tagPage = 0
+	}
+
+	start := tagPage * tagsPerPage
+	end := start + tagsPerPage
+	if end > len(deckTags) {
+		end = len(deckTags)
+	}
+
+	if len(deckTags) == 0 {
+		drawLabel(Rect{tagRowArea.X, tagAreaTop, tagRowArea.W, tagRowH}, "No tags on this deck", FontMenu, activeStyle.SizeMenu*5/8, "GRAY8")
+	}
+	for i, tag := range deckTags[start:end] {
+		r := Rect{tagRowArea.X, tagAreaTop + i*tagRowH, tagRowArea.W, tagRowH}
+		id := fmt.Sprintf("tag-%d", start+i)
+		state := "Off"
+		if selectedTags[tag] {
+			state = "On"
+		}
+		drawOptionRow(id, r, tag, state, FontMenu, activeStyle.SizeMenu*5/8)
+	}
+
+	// Action zone: 2x2 grid — prev/next on top row, back below, same layout
+	// as drawDecksScreen's own prev/next/action row.
+	actionInner := insetHV(actionRect, gap/2, vgap/2)
+	rows := splitV(actionInner, 2, vgap)
+	topCols := splitH(rows[0], 2, gap)
+
+	if tagPage > 0 {
+		drawButton("prev", shrinkV(topCols[0], 80), "< Prev", FontMenu, activeStyle.SizeMenu/2)
+	} else {
+		drawButtonDisabled(shrinkV(topCols[0], 80), "< Prev", FontMenu, activeStyle.SizeMenu/2)
+	}
+	if tagPage < totalPages-1 {
+		drawButton("next", shrinkV(topCols[1], 80), "Next >", FontMenu, activeStyle.SizeMenu/2)
+	} else {
+		drawButtonDisabled(shrinkV(topCols[1], 80), "Next >", FontMenu, activeStyle.SizeMenu/2)
+	}
+
+	drawButton("back", shrinkV(rows[1], 80), "Back", FontMenu, activeStyle.SizeMenu/2)
 
 	flushScreen()
 	drainTouch()
@@ -1315,7 +1548,7 @@ func main() {
 
 	coreCfg := core.LoadCoreConfig("config/anki-core.conf")
 	dataDir = coreCfg.DataDir
-	reverseMode = coreCfg.Reverse
+	defaultReverse = coreCfg.Reverse
 	htmlFontScale = coreCfg.HTMLFontScale
 	globalCardCSSTag = core.BaseCardCSS
 	if css, err := os.ReadFile("config/cards.css"); err == nil {
@@ -1326,6 +1559,10 @@ func main() {
 	core.InitScheduler(coreCfg.RequestRetention, coreCfg.MaximumInterval, coreCfg.EnableShortTerm)
 
 	loadConfig()
+	var gs globalStateData
+	if loadJSONFile(statePath(), &gs) {
+		cfg.DarkMode = gs.DarkMode
+	}
 	detectScreen()
 	computeLayout()
 	canvas = NewCanvas(screenW, screenH)
@@ -1370,8 +1607,9 @@ func main() {
 				canvas.Clear(0xFF)
 				flushScreen()
 				return
-			case id == "reverse":
-				reverseMode = !reverseMode
+			case id == "darkmode":
+				cfg.DarkMode = !cfg.DarkMode
+				saveJSONFile(statePath(), globalStateData{DarkMode: cfg.DarkMode})
 				drawDecksScreen()
 			case id == "prev" && deckPage > 0:
 				deckPage--
@@ -1379,6 +1617,13 @@ func main() {
 			case id == "next":
 				deckPage++
 				drawDecksScreen()
+			case strings.HasPrefix(id, "deck-settings-"):
+				idx, _ := strconv.Atoi(strings.TrimPrefix(id, "deck-settings-"))
+				if idx >= 0 && idx < len(decks) {
+					openDeckSettings(decks[idx])
+					screen = ScreenDeckSettings
+					drawDeckSettingsScreen()
+				}
 			case strings.HasPrefix(id, "deck-"):
 				idx, _ := strconv.Atoi(strings.TrimPrefix(id, "deck-"))
 				if idx >= 0 && idx < len(decks) {
@@ -1439,7 +1684,7 @@ func main() {
 		case ScreenDone:
 			switch {
 			case id == "ahead":
-				session = core.NewStudyAheadSession(cards, sessionCfg)
+				session = core.NewStudyAheadSession(reviewCards, sessionCfg)
 				currentCard = session.Current(cards)
 				if currentCard != nil {
 					screen = ScreenFront
@@ -1448,6 +1693,31 @@ func main() {
 			case id != "":
 				screen = ScreenDecks
 				drawDecksScreen()
+			}
+
+		case ScreenDeckSettings:
+			switch {
+			case id == "back":
+				screen = ScreenDecks
+				drawDecksScreen()
+			case id == "reverse":
+				reverseMode = !reverseMode
+				saveDeckSettings()
+				drawDeckSettingsScreen()
+			case id == "prev" && tagPage > 0:
+				tagPage--
+				drawDeckSettingsScreen()
+			case id == "next":
+				tagPage++
+				drawDeckSettingsScreen()
+			case strings.HasPrefix(id, "tag-"):
+				idx, _ := strconv.Atoi(strings.TrimPrefix(id, "tag-"))
+				if idx >= 0 && idx < len(deckTags) {
+					tag := deckTags[idx]
+					selectedTags[tag] = !selectedTags[tag]
+					saveDeckSettings()
+					drawDeckSettingsScreen()
+				}
 			}
 		}
 	}
