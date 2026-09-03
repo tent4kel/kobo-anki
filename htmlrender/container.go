@@ -18,6 +18,7 @@ import (
 	"image/png"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -83,12 +84,16 @@ type Container struct {
 	boldItalic *opentype.Font
 
 	// customFonts holds @font-face fonts registered by RegisterFontFaces,
-	// keyed by lowercased family name. litehtml itself never sees
-	// @font-face at all (this vendored build only recognizes @charset,
-	// @import, @media - any other at-rule, including @font-face, is
-	// silently discarded during CSS parsing), so this container has to
-	// find and load them itself before litehtml starts requesting fonts.
-	customFonts map[string]*opentype.Font
+	// keyed by lowercased family name plus the bold/italic variant that
+	// block's own font-weight/font-style declared - a deck registering all
+	// four weights (see NV Newsreader's bundled files) gets real bold and
+	// italic, not the same face redrawn regardless of weight. litehtml
+	// itself never sees @font-face at all (this vendored build only
+	// recognizes @charset, @import, @media - any other at-rule, including
+	// @font-face, is silently discarded during CSS parsing), so this
+	// container has to find and load them itself before litehtml starts
+	// requesting fonts.
+	customFonts map[customFontKey]*opentype.Font
 }
 
 // New allocates a container whose litehtml-facing layout space is w x h
@@ -139,29 +144,60 @@ func New(w, h int, resolver MediaResolver, scale float32) *Container {
 }
 
 var (
-	// A small, deliberate subset - one @font-face block, one font-family,
-	// one src url - matching how this project scopes every other CSS/HTML
-	// parsing bit it hand-rolls (see kobo-vocab/selector.go). Multiple
-	// @font-face blocks for the same family at different weights (regular
-	// vs. bold as separate files) all collapse onto whichever this project
-	// sees last for that family name; a deck relying on that distinction
-	// gets one face used for both, not a parse failure.
+	// A small, deliberate subset - one font-family, one optional
+	// font-weight/font-style, one src url per @font-face block - matching
+	// how this project scopes every other CSS/HTML parsing bit it
+	// hand-rolls (see kobo-vocab/selector.go).
 	fontFaceBlockRe = regexp.MustCompile(`(?is)@font-face\s*\{([^}]*)\}`)
 	fontFamilyRe    = regexp.MustCompile(`(?is)font-family\s*:\s*['"]?([^;'"]+?)['"]?\s*;`)
+	fontWeightRe    = regexp.MustCompile(`(?is)font-weight\s*:\s*([^;]+?)\s*;`)
+	fontStyleRe     = regexp.MustCompile(`(?is)font-style\s*:\s*([^;]+?)\s*;`)
 	fontSrcURLRe    = regexp.MustCompile(`(?is)url\(\s*['"]?([^'")]+?)['"]?\s*\)`)
+	cssCommentRe    = regexp.MustCompile(`(?s)/\*.*?\*/`)
 )
+
+// customFontKey identifies one registered @font-face: a family name plus
+// the bold/italic variant its own font-weight/font-style declared (absent
+// = regular, matching CSS's own default). Anki's stock templates mark bold
+// with <b> (weight 700) and italic with <i>/font-style:italic - see
+// resolveCustomFont for how those map onto this.
+type customFontKey struct {
+	family string
+	bold   bool
+	italic bool
+}
+
+// isBoldFontWeight reports whether an @font-face block's font-weight value
+// (a CSS keyword or a numeric weight) counts as bold - same >=700 threshold
+// pickFont already uses for descr.Weight, so a registered "font-weight:
+// bold" face and a requested weight:700 span agree on what bold means.
+func isBoldFontWeight(v string) bool {
+	switch strings.ToLower(v) {
+	case "bold", "bolder":
+		return true
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		return n >= 700
+	}
+	return false
+}
 
 // RegisterFontFaces scans html's stylesheets for @font-face rules and loads
 // each referenced font file through the container's MediaResolver (the
 // same mechanism <img> uses), so CreateFont can serve them by family name
-// instead of always falling back to the four bundled Go fonts. Call this
-// once, before litehtml.NewDocument, on the exact html string that will be
-// rendered. A nil resolver, or a document with no @font-face rules, is a
-// silent no-op.
+// (and, if registered, the right bold/italic variant) instead of always
+// falling back to the four bundled Go fonts. Call this once, before
+// litehtml.NewDocument, on the exact html string that will be rendered. A
+// nil resolver, or a document with no @font-face rules, is a silent no-op.
 func (c *Container) RegisterFontFaces(html string) {
 	if c.resolveMedia == nil {
 		return
 	}
+	// Strip CSS comments first - this scans raw text with a regex, not a
+	// real CSS parser, so without this a /* @font-face {...} */ block a
+	// deck author disabled the normal CSS way would still be found and
+	// loaded.
+	html = cssCommentRe.ReplaceAllString(html, "")
 	for _, block := range fontFaceBlockRe.FindAllStringSubmatch(html, -1) {
 		body := block[1]
 		fm := fontFamilyRe.FindStringSubmatch(body)
@@ -181,23 +217,45 @@ func (c *Container) RegisterFontFaces(html string) {
 			continue
 		}
 		if c.customFonts == nil {
-			c.customFonts = make(map[string]*opentype.Font)
+			c.customFonts = make(map[customFontKey]*opentype.Font)
 		}
-		c.customFonts[family] = f
+		key := customFontKey{family: family}
+		if wm := fontWeightRe.FindStringSubmatch(body); wm != nil {
+			key.bold = isBoldFontWeight(strings.TrimSpace(wm[1]))
+		}
+		if sm2 := fontStyleRe.FindStringSubmatch(body); sm2 != nil {
+			v := strings.ToLower(strings.TrimSpace(sm2[1]))
+			key.italic = v == "italic" || v == "oblique"
+		}
+		c.customFonts[key] = f
 	}
 }
 
 // resolveCustomFont checks familyList (litehtml's comma-separated
 // font-family value, e.g. `"MyFont", Arial, sans-serif` - litehtml passes
 // the raw CSS list through unresolved) against fonts RegisterFontFaces
-// found, first match wins, same fallback order the CSS itself specifies.
-func (c *Container) resolveCustomFont(familyList string) *opentype.Font {
+// found, first family match wins, same fallback order the CSS itself
+// specifies. Within a matched family, the exact bold/italic variant is
+// preferred; if that specific variant was never registered (the common
+// case: a deck declares just one @font-face), degrades to that family's
+// regular face rather than falling all the way through to a different
+// fallback family just because true bold/italic wasn't supplied - still
+// the right typeface, not synthesized, but not silently swapped out either.
+func (c *Container) resolveCustomFont(familyList string, weight int, style litehtml.FontStyle) *opentype.Font {
 	if len(c.customFonts) == 0 {
 		return nil
 	}
+	isBold := weight >= 700
+	isItalic := style == litehtml.FontStyleItalic
 	for _, name := range strings.Split(familyList, ",") {
 		name = strings.ToLower(strings.Trim(strings.TrimSpace(name), `"'`))
-		if f, ok := c.customFonts[name]; ok {
+		if f, ok := c.customFonts[customFontKey{name, isBold, isItalic}]; ok {
+			return f
+		}
+	}
+	for _, name := range strings.Split(familyList, ",") {
+		name = strings.ToLower(strings.Trim(strings.TrimSpace(name), `"'`))
+		if f, ok := c.customFonts[customFontKey{family: name}]; ok {
 			return f
 		}
 	}
@@ -220,7 +278,7 @@ func (c *Container) pickFont(weight int, style litehtml.FontStyle) *opentype.Fon
 }
 
 func (c *Container) CreateFont(descr litehtml.FontDescription) (uintptr, litehtml.FontMetrics) {
-	otFont := c.resolveCustomFont(descr.Family)
+	otFont := c.resolveCustomFont(descr.Family, descr.Weight, descr.Style)
 	if otFont == nil {
 		otFont = c.pickFont(descr.Weight, descr.Style)
 	}

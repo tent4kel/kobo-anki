@@ -22,7 +22,7 @@
  */
 
 .card {
-    font-family: "NV Newsreader", Georgia, serif;
+    font-family: Georgia, serif;
     color: black;
 }
 
@@ -32,7 +32,10 @@
  * plain .card, which matches the front face's own screen too - litehtml
  * has no :has()/previous-sibling selector, so a blanket ".card" rule with
  * an "#answer ~ *" reset has nothing to reset on the front-only document,
- * leaving it stuck small. */
+ * leaving it stuck small.
+ *
+ * Commented out for the 1.3.1 release: 14px/20px were example values from
+ * live tuning, not a default every deck should get.
 .kobo-anki-back {
     font-size: 14px;
 }
@@ -41,14 +44,45 @@
 .kobo-anki-back #answer ~ * {
     font-size: 20px;
 }
+*/
 
 /* NV Newsreader ships with the app under fonts/ (see docs/fbink.md) -
  * unlike font_dir in anki-fbink.conf, an apkg card's @font-face can only
  * escape its deck's own media sandbox via a genuinely absolute path (see
  * cmd/fbink's deckMediaResolver), so this can't be relative. Adjust the
  * path if deployed under a folder name other than "kobo-anki" (e.g. a
- * side-by-side "-beta" test install). */
+ * side-by-side "-beta" test install).
+ *
+ * All four weights are registered, not just Regular: htmlrender keys a
+ * registered @font-face by family plus the bold/italic its own
+ * font-weight/font-style declares, so <b>/<i>/.cloze get real bold and
+ * italic glyphs instead of Regular's redrawn without a weight change (which
+ * is what one @font-face alone degrades to - visually consistent with the
+ * family, but not actually bold or italic).
+ *
+ * Commented out for the 1.3.1 release: the absolute path only resolves
+ * under the exact install folder name it names (see comment above), which
+ * isn't true for every install by default - uncomment and adjust the path
+ * to actually turn it on. Add "NV Newsreader", back into .card's
+ * font-family above once enabled.
 @font-face {
     font-family: "NV Newsreader";
     src: url('/mnt/onboard/.adds/kobo-anki/fonts/NV_Newsreader-Regular.ttf');
 }
+@font-face {
+    font-family: "NV Newsreader";
+    font-weight: bold;
+    src: url('/mnt/onboard/.adds/kobo-anki/fonts/NV_Newsreader-Bold.ttf');
+}
+@font-face {
+    font-family: "NV Newsreader";
+    font-style: italic;
+    src: url('/mnt/onboard/.adds/kobo-anki/fonts/NV_Newsreader-Italic.ttf');
+}
+@font-face {
+    font-family: "NV Newsreader";
+    font-weight: bold;
+    font-style: italic;
+    src: url('/mnt/onboard/.adds/kobo-anki/fonts/NV_Newsreader-BoldItalic.ttf');
+}
+*/
