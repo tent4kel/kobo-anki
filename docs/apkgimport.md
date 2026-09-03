@@ -43,9 +43,25 @@ media, the same way `<img>` sources do. Without one, four bundled sans-serif fac
 (regular, bold, italic, bold-italic) cover everything else. A font is only picked up if a
 `@font-face` rule actually names it.
 
-**Using a Kobo system font.** `@font-face` in `cards.css` can reference one of the fonts
-already on the device (`/mnt/onboard/fonts/extra-kobo/*.ttf` etc.) by its literal absolute
-path — `src: url('/mnt/onboard/fonts/extra-kobo/KF_Literata-Regular.ttf')`.
+**Using a Kobo system font, or the app's own bundled one.** `@font-face` in `cards.css` can
+reference any font file already on the device by its literal absolute path — one of
+Kobo's own (`/mnt/onboard/fonts/extra-kobo/*.ttf`) or the app's own bundled
+`fonts/NV_Newsreader-Regular.ttf` (see [fbink](fbink.md)), adjusted for whichever `.adds/`
+folder name it's actually deployed under:
+
+```css
+@font-face {
+  font-family: "NV Newsreader";
+  src: url('/mnt/onboard/.adds/kobo-anki/fonts/NV_Newsreader-Regular.ttf');
+}
+.card {
+  font-family: "NV Newsreader", serif;
+}
+```
+
+Only one face is ever used per family name here — registering both a Regular and a Bold
+`@font-face` under the same `font-family` doesn't give you real bold, the second one just
+replaces the first for every weight (see `htmlrender.Container.RegisterFontFaces`).
 
 **Per-deck styling.** Each of a deck's note types' CSS is written to its own
 `style-<model>.css` entry in the deck's media archive (a deck usually has one or two note

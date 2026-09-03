@@ -1,8 +1,13 @@
 # FBInk display configuration
 # NV Newsreader (OFL-licensed, see fonts/OFL.txt) ships with the app under
 # fonts/ and is deployed to this path by deploy-ftp.sh - no separate font
-# install needed.
-font_dir=/mnt/onboard/.adds/kobo-anki/fonts
+# install needed. Relative, not an absolute /mnt/onboard/.adds/<folder>/fonts
+# path: resolved against the app's own working directory (same as
+# config/anki-fbink.conf itself), so it's correct regardless of which
+# folder name under .adds/ this is deployed as - a hardcoded absolute path
+# here silently pointed at the wrong install's fonts/ the moment two
+# side-by-side installs (e.g. a "-beta" test folder) existed.
+font_dir=fonts
 font_front=NV_Newsreader-Regular.ttf
 font_back=NV_Newsreader-Regular.ttf
 font_menu=NV_Newsreader-Regular.ttf

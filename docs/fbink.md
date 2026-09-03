@@ -10,13 +10,22 @@ The app ships its own reading font - `fonts/NV_Newsreader-*.ttf`
 [Newsreader](https://fonts.google.com/specimen/Newsreader) tuned for e-ink by Nico
 Verbruggen; OFL-licensed, see `fonts/OFL.txt`) - deployed by `deploy-ftp.sh` alongside the
 binaries, so no separate font install is needed. Point `font_dir`/`font_front`/etc. at a
-different font (e.g. one already on the device under `/mnt/onboard/fonts/`) if you'd rather
-use that instead.
+different font (e.g. one already on the device under `/mnt/onboard/fonts/`, by absolute
+path) if you'd rather use that instead.
+
+This only covers the native UI - deck list, menus, and Markdown-format flashcards. An
+apkg-imported HTML card is rendered by a completely separate path (`litehtml`, see
+"Rendering architecture" below) that never reads `font_dir`; it falls back to Go's own
+embedded sans-serif font unless the deck's own CSS declares an `@font-face` pointing at a
+real file, same as any browser. See [apkgimport](apkgimport.md)'s "Using a Kobo system
+font" for that - the same `@font-face` technique also works to point an HTML card at
+`fonts/NV_Newsreader-Regular.ttf`, just by its absolute on-device path rather than
+`font_dir` (which apkg cards don't consult).
 
 `anki-fbink.conf`:
 
 ```ini
-font_dir=/mnt/onboard/.adds/kobo-anki/fonts
+font_dir=fonts
 font_front=NV_Newsreader-Regular.ttf
 font_back=NV_Newsreader-Italic.ttf
 font_menu=NV_Newsreader-Regular.ttf

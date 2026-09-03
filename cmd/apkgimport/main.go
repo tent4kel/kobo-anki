@@ -260,8 +260,8 @@ func importGroup(deckName string, resolved []ankipkg.Resolved, media map[string]
 		// those siblings must not collide on core.Card.Key.
 		id := fmt.Sprintf("%d", r.CardID)
 		slug := slugify(r.ModelName)
-		front := refCard(slug, r.Question)
-		back := refCard(slug, r.Answer)
+		front := refCard(slug, r.Question, false)
+		back := refCard(slug, r.Answer, true)
 
 		if prior, ok := byID[id]; ok {
 			// Re-import: keep review history, only refresh the rendered
@@ -299,8 +299,22 @@ func importGroup(deckName string, resolved []ankipkg.Resolved, media map[string]
 // face now just references its model's stylesheet by name; see
 // core.ExtractCardStyleRef (the reading side) and writeStylesIfMissing
 // (where "style-slug.css" actually gets written).
-func refCard(styleSlug, body string) string {
-	return "<!--css:" + styleSlug + `--><div class="card">` + body + "</div>"
+//
+// back marks the answer face with an extra "kobo-anki-back" class the
+// question face never gets. Both faces render as separate documents, each
+// wrapped in the same generic .card - the only thing that structurally
+// differs is that the back face may also contain Anki's stock "#answer"
+// marker (from {{FrontSide}}<hr id=answer>{{Back}}), and litehtml has no
+// :has() to write a cards.css rule that detects that from outside .card.
+// Without this class, a rule meant to shrink just the back face's repeated
+// front (see docs/apkgimport.md) has no way to avoid also shrinking the
+// question face's own .card, which has no #answer to reset it back up.
+func refCard(styleSlug, body string, back bool) string {
+	class := "card"
+	if back {
+		class = "card kobo-anki-back"
+	}
+	return "<!--css:" + styleSlug + `--><div class="` + class + `">` + body + "</div>"
 }
 
 // readExistingStyles reads every style-*.css entry already in mediaZip (if
