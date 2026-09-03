@@ -5,13 +5,21 @@ panel, via [FBInk](https://github.com/NiLuJe/FBInk). No WiFi or browser needed.
 
 ## Configuration
 
+The app ships its own reading font - `fonts/NV_Newsreader-*.ttf`
+([NV Newsreader](https://github.com/nicoverbruggen/ebook-fonts), a variant of Google's
+[Newsreader](https://fonts.google.com/specimen/Newsreader) tuned for e-ink by Nico
+Verbruggen; OFL-licensed, see `fonts/OFL.txt`) - deployed by `deploy-ftp.sh` alongside the
+binaries, so no separate font install is needed. Point `font_dir`/`font_front`/etc. at a
+different font (e.g. one already on the device under `/mnt/onboard/fonts/`) if you'd rather
+use that instead.
+
 `anki-fbink.conf`:
 
 ```ini
-font_dir=/mnt/onboard/fonts/extra-kobo
-font_front=KF_Newsreader-Regular.ttf
-font_back=KF_Newsreader-Italic.ttf
-font_menu=KF_Newsreader-Regular.ttf
+font_dir=/mnt/onboard/.adds/kobo-anki/fonts
+font_front=NV_Newsreader-Regular.ttf
+font_back=NV_Newsreader-Italic.ttf
+font_menu=NV_Newsreader-Regular.ttf
 size_title=24
 size_card=28
 size_menu=16
@@ -25,12 +33,13 @@ touch_cooldown=300
 
 # Optional: explicit bold/italic files for Markdown emphasis in card text.
 # If omitted, a same-directory "Foo-Regular.ttf" -> "Foo-Bold.ttf" naming
-# convention is tried automatically; if no real file is found either way,
-# bold falls back to a synthetic double-strike and italic falls back to
-# plain text (no synthetic italic).
-# font_front_bold=KF_Newsreader-Bold.ttf
-# font_front_italic=KF_Newsreader-Italic.ttf
-# font_back_bold=KF_Newsreader-BoldItalic.ttf
+# convention is tried automatically - which is why the bundled NV Newsreader
+# files above need no overrides, they already follow it; if no real file is
+# found either way, bold falls back to a synthetic double-strike and italic
+# falls back to plain text (no synthetic italic).
+# font_front_bold=NV_Newsreader-Bold.ttf
+# font_front_italic=NV_Newsreader-Italic.ttf
+# font_back_bold=NV_Newsreader-BoldItalic.ttf
 
 # Optional per-deck overrides for the front/back card screens - any key
 # above can be overridden for one deck (the CSV filename without ".csv"):

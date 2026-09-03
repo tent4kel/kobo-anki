@@ -20,8 +20,8 @@
 #
 # Never touches words/ (your live flashcard progress), apkg/ (files dropped
 # there for start-apkg.sh to import), or logs/ on-device - only the files
-# that ship in the tarball (bin/, templates/, config/, samples/, start*.sh)
-# get uploaded/overwritten.
+# that ship in the tarball (bin/, templates/, config/, fonts/, samples/,
+# start*.sh) get uploaded/overwritten.
 #
 # Dictionaries are the one exception to "everything lands under the app
 # folder": dict/*.zip go to /mnt/onboard/.kobo/custom-dict, which is Nickel's
@@ -57,7 +57,7 @@ echo "Deploying to ftp://$KOBO_USER@$KOBO_HOST:$KOBO_PORT/.adds/$KOBO_FOLDER/"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
-mkdir -p "$STAGE/bin" "$STAGE/templates" "$STAGE/config"
+mkdir -p "$STAGE/bin" "$STAGE/templates" "$STAGE/config" "$STAGE/fonts"
 cp bin/kobo-anki-fbink bin/kobo-anki-apkgimport bin/kobo-anki-server bin/kobo-vocab "$STAGE/bin/"
 # fbink itself is only uploaded if you already have one built/placed in
 # bin/ locally - it needs an image-support-enabled build (see
@@ -73,6 +73,10 @@ cp anki-core.conf anki-fbink.conf anki-mywords.conf "$STAGE/config/"
 # anki-mywords.conf.example), so this is deployed unconditionally.
 cp cacert.pem "$STAGE/config/"
 cp templates/*.html "$STAGE/templates/"
+# Bundled reading font (NV Newsreader, OFL-licensed - see fonts/OFL.txt) so
+# cmd/fbink works out of the box instead of assuming the device already has
+# Kobo's own KF_Newsreader under /mnt/onboard/fonts/extra-kobo.
+cp fonts/*.ttf fonts/OFL.txt "$STAGE/fonts/"
 if [ -f french.csv ]; then
     mkdir -p "$STAGE/samples"
     cp french.csv "$STAGE/samples/"

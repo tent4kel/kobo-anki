@@ -1,21 +1,18 @@
 # FBInk display configuration
-font_dir=/mnt/onboard/fonts/extra-kobo
-font_front=KF_Newsreader-Regular.ttf
-font_back=KF_Newsreader-Regular.ttf
-font_menu=KF_Newsreader-Regular.ttf
+# NV Newsreader (OFL-licensed, see fonts/OFL.txt) ships with the app under
+# fonts/ and is deployed to this path by deploy-ftp.sh - no separate font
+# install needed.
+font_dir=/mnt/onboard/.adds/kobo-anki/fonts
+font_front=NV_Newsreader-Regular.ttf
+font_back=NV_Newsreader-Regular.ttf
+font_menu=NV_Newsreader-Regular.ttf
 
-# Optional: explicit bold/italic files for Markdown emphasis in card text.
-# If omitted, a same-directory "Foo-Regular.ttf" -> "Foo-Bold.ttf" naming
-# convention is tried automatically; if no real file is found either way,
-# bold falls back to a synthetic double-strike and italic falls back to
-# plain (no synthetic italic - shearing rasterized glyphs by hand risked
-# producing corrupted output without a real device to verify it on).
-# font_front_bold=KF_Newsreader-Bold.ttf
-# font_front_italic=KF_Newsreader-Italic.ttf
-# font_back_bold=KF_Newsreader-Bold.ttf
-# font_back_italic=KF_Newsreader-Italic.ttf
-# font_menu_bold=KF_Newsreader-Bold.ttf
-# font_menu_italic=KF_Newsreader-Italic.ttf
+# Bold/italic are found automatically: the bundled files already follow the
+# "Foo-Regular.ttf" -> "Foo-Bold.ttf"/"Foo-Italic.ttf"/"Foo-BoldItalic.ttf"
+# naming convention, so no font_*_bold/font_*_italic overrides are needed
+# here. Set them explicitly only if you swap in a font that doesn't follow
+# that convention; if no bold/italic file is found either way, bold falls
+# back to a synthetic double-strike and italic falls back to plain text.
 
 # Font sizes (in points for TrueType)
 size_title=24

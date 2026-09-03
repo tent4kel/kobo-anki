@@ -48,6 +48,9 @@ and installing on the device.
 - [goldmark](https://github.com/yuin/goldmark) — Markdown parsing (MIT)
 - [x/image](https://pkg.go.dev/golang.org/x/image) — pure-Go TrueType/OpenType font rendering (BSD)
 - [NickelMenu](https://pgaskin.net/NickelMenu/) — Kobo launcher
+- [NV Newsreader](https://github.com/nicoverbruggen/ebook-fonts) by Nico Verbruggen, a variant of
+  [Newsreader](https://fonts.google.com/specimen/Newsreader) by Production Type — bundled reading
+  font (OFL-1.1)
 
 ## License
 

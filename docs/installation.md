@@ -59,6 +59,7 @@ if your device has an SSH server enabled) into `.adds/`, giving you this layout:
 │   ├── state.json          ← created automatically: dark mode, toggled on-device
 │   └── decksettings/       ← created automatically: per-deck reverse/tag-filter choices
 ├── dict/                   ← optional: dicthtml-*.zip dictionaries kept beside the app
+├── fonts/                  ← bundled NV Newsreader (OFL) - see docs/fbink.md
 ├── templates/              ← only needed for server mode
 ├── samples/
 │   └── french.csv          ← sample deck; copy into words/ to try the app
