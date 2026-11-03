@@ -16,14 +16,14 @@ func charMeasure(s string) fixed.Int26_6 {
 }
 
 func TestTruncateTagAnnotationNoTagsReturnsBareName(t *testing.T) {
-	got := truncateTagAnnotation("french", nil, fixed.I(1000), charMeasure)
+	got := truncateTagAnnotation("french", nil, ", ", fixed.I(1000), charMeasure)
 	if got != "french" {
 		t.Fatalf("truncateTagAnnotation(no tags) = %q, want %q", got, "french")
 	}
 }
 
 func TestTruncateTagAnnotationAllTagsFit(t *testing.T) {
-	got := truncateTagAnnotation("french", []string{"noun", "verb"}, fixed.I(1000), charMeasure)
+	got := truncateTagAnnotation("french", []string{"noun", "verb"}, ", ", fixed.I(1000), charMeasure)
 	want := "french (noun, verb)"
 	if got != want {
 		t.Fatalf("truncateTagAnnotation(fits) = %q, want %q", got, want)
@@ -32,7 +32,7 @@ func TestTruncateTagAnnotationAllTagsFit(t *testing.T) {
 
 func TestTruncateTagAnnotationDropsTagsThatDontFit(t *testing.T) {
 	full := "french (noun, verb, irregular)"
-	got := truncateTagAnnotation("french", []string{"noun", "verb", "irregular"}, fixed.I(len(full)-1), charMeasure)
+	got := truncateTagAnnotation("french", []string{"noun", "verb", "irregular"}, ", ", fixed.I(len(full)-1), charMeasure)
 
 	want := "french (noun, verb, …)"
 	if got != want {
@@ -40,8 +40,18 @@ func TestTruncateTagAnnotationDropsTagsThatDontFit(t *testing.T) {
 	}
 }
 
+func TestTruncateTagAnnotationUsesSeparator(t *testing.T) {
+	full := "french (noun + verb + irregular)"
+	got := truncateTagAnnotation("french", []string{"noun", "verb", "irregular"}, " + ", fixed.I(len(full)-1), charMeasure)
+
+	want := "french (noun + verb + …)"
+	if got != want {
+		t.Fatalf("truncateTagAnnotation(sep +) = %q, want %q", got, want)
+	}
+}
+
 func TestTruncateTagAnnotationFallsBackToBareNameWhenNoTagFits(t *testing.T) {
-	got := truncateTagAnnotation("french", []string{"noun"}, fixed.I(len("french")), charMeasure)
+	got := truncateTagAnnotation("french", []string{"noun"}, ", ", fixed.I(len("french")), charMeasure)
 	if got != "french" {
 		t.Fatalf("truncateTagAnnotation(nothing fits) = %q, want %q", got, "french")
 	}

@@ -16,7 +16,7 @@ func TestFilterByTagsNoSelectionReturnsAllCards(t *testing.T) {
 		{Front: "b"},
 	}
 
-	got := FilterByTags(cards, nil)
+	got := FilterByTags(cards, nil, false)
 
 	if len(got) != len(cards) {
 		t.Fatalf("FilterByTags(cards, nil) = %d cards, want %d (unfiltered)", len(got), len(cards))
@@ -31,7 +31,7 @@ func TestFilterByTagsMatchesAnySelectedTag(t *testing.T) {
 		{Front: "d"},
 	}
 
-	got := FilterByTags(cards, []string{"verb", "irregular"})
+	got := FilterByTags(cards, []string{"verb", "irregular"}, false)
 
 	want := []string{"b", "c"}
 	if gk := cardKeys(got); !equalStrings(gk, want) {
@@ -42,10 +42,35 @@ func TestFilterByTagsMatchesAnySelectedTag(t *testing.T) {
 func TestFilterByTagsNoMatchesReturnsEmpty(t *testing.T) {
 	cards := []Card{{Front: "a", Tags: []string{"noun"}}}
 
-	got := FilterByTags(cards, []string{"adjective"})
+	got := FilterByTags(cards, []string{"adjective"}, false)
 
 	if len(got) != 0 {
 		t.Fatalf("FilterByTags with no matching tag = %d cards, want 0", len(got))
+	}
+}
+
+func TestFilterByTagsMatchAllRequiresEverySelectedTag(t *testing.T) {
+	cards := []Card{
+		{Front: "a", Tags: []string{"noun"}},
+		{Front: "b", Tags: []string{"noun", "irregular"}},
+		{Front: "c", Tags: []string{"irregular", "verb", "noun"}},
+		{Front: "d"},
+		{Front: "e", Tags: []string{"noun", "noun"}},
+	}
+
+	got := FilterByTags(cards, []string{"noun", "irregular"}, true)
+
+	want := []string{"b", "c"}
+	if gk := cardKeys(got); !equalStrings(gk, want) {
+		t.Fatalf("FilterByTags(cards, [noun irregular], all) = %v, want %v", gk, want)
+	}
+}
+
+func TestFilterByTagsMatchAllNoSelectionReturnsAllCards(t *testing.T) {
+	cards := []Card{{Front: "a", Tags: []string{"noun"}}, {Front: "b"}}
+
+	if got := FilterByTags(cards, nil, true); len(got) != len(cards) {
+		t.Fatalf("FilterByTags(cards, nil, all) = %d cards, want %d (unfiltered)", len(got), len(cards))
 	}
 }
 

@@ -16,10 +16,22 @@ type globalStateData struct {
 }
 
 // deckSettingsData is one deck's reverse/tag-filter choice, made from the
-// deck-settings screen and persisted so it survives a relaunch.
+// deck-settings screen and persisted so it survives a relaunch. MatchAll
+// switches the tag filter from "any selected tag" to "every selected tag";
+// files written before it existed decode it as false, the old behavior.
 type deckSettingsData struct {
-	Reverse bool     `json:"reverse"`
-	Tags    []string `json:"tags"`
+	Reverse  bool     `json:"reverse"`
+	Tags     []string `json:"tags"`
+	MatchAll bool     `json:"match_all"`
+}
+
+// tagSeparator joins a deck's selected tags in its decks-screen annotation:
+// "+" reads as "all of these", "," as "any of these".
+func (ds deckSettingsData) tagSeparator() string {
+	if ds.MatchAll {
+		return " + "
+	}
+	return ", "
 }
 
 // statePath and deckSettingsPath both live under config/, alongside

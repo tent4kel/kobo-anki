@@ -294,6 +294,7 @@ var (
 	settingsDeck string
 	deckTags     []string
 	selectedTags map[string]bool
+	tagMatchAll  bool
 	tagPage      int
 	tagsPerPage  int
 
@@ -962,7 +963,7 @@ func openDeck(name string) {
 	// The session's queue is built from the filtered subset, but Session
 	// resolves/mutates cards by key (see core.Session), so Current/Rate
 	// always take the full cards slice - that's what gets saved.
-	reviewCards = core.FilterByTags(cards, ds.Tags)
+	reviewCards = core.FilterByTags(cards, ds.Tags, ds.MatchAll)
 	session = core.NewSession(reviewCards, sessionCfg)
 	currentCard = session.Current(cards)
 }
@@ -983,6 +984,7 @@ func openDeckSettings(deck string) {
 		ds.Reverse = defaultReverse
 	}
 	reverseMode = ds.Reverse
+	tagMatchAll = ds.MatchAll
 
 	selectedTags = make(map[string]bool, len(ds.Tags))
 	for _, t := range ds.Tags {
@@ -999,7 +1001,7 @@ func saveDeckSettings() {
 			tags = append(tags, t)
 		}
 	}
-	saveJSONFile(deckSettingsPath(settingsDeck), deckSettingsData{Reverse: reverseMode, Tags: tags})
+	saveJSONFile(deckSettingsPath(settingsDeck), deckSettingsData{Reverse: reverseMode, Tags: tags, MatchAll: tagMatchAll})
 }
 
 func displayFront() string {
@@ -1087,7 +1089,7 @@ func drawDecksScreen() {
 		var ds deckSettingsData
 		loadJSONFile(deckSettingsPath(d), &ds)
 		if len(ds.Tags) > 0 {
-			c = core.FilterByTags(c, ds.Tags)
+			c = core.FilterByTags(c, ds.Tags, ds.MatchAll)
 		}
 		// The real backlog, deliberately - not just what the pool would hand
 		// over first. The pool paces how fast unseen cards trickle into a
@@ -1112,7 +1114,7 @@ func drawDecksScreen() {
 			}
 			return xfont.MeasureString(rf.Face, s)
 		}
-		name := truncateTagAnnotation(d, ds.Tags, fixed.I(nameRect.W), measure)
+		name := truncateTagAnnotation(d, ds.Tags, ds.tagSeparator(), fixed.I(nameRect.W), measure)
 		fbinkTextRect(nameRect, name, FontMenu, activeStyle.SizeMenu*5/8, "", AlignLeft, true)
 
 		dueRect := Rect{row.X, row.Y, row.W - screenW/20, row.H}
@@ -1184,8 +1186,14 @@ func drawDeckSettingsScreen() {
 	}
 	drawOptionRow("reverse", reverseRect, "Reverse card sides:", reverseState, FontMenu, activeStyle.SizeMenu*5/8)
 
-	headerRect := Rect{rowArea.X, reverseRect.Y + reverseRect.H, rowArea.W, screenH * 5 / 100}
-	fbinkTextRect(Rect{headerRect.X + screenW/20, headerRect.Y, headerRect.W - screenW/20, headerRect.H}, "Filter by tags:", FontMenu, activeStyle.SizeMenu*5/8, "", AlignLeft, true)
+	// The tag list's header doubles as its Any/All toggle: a card must
+	// carry at least one selected tag (Any) or every one of them (All).
+	headerRect := Rect{rowArea.X, reverseRect.Y + reverseRect.H, rowArea.W, screenH * 7 / 100}
+	matchState := "Any"
+	if tagMatchAll {
+		matchState = "All"
+	}
+	drawOptionRow("tagmatch", headerRect, "Filter by tags, match:", matchState, FontMenu, activeStyle.SizeMenu*5/8)
 
 	// Tag rows indent from the left, under "Filter by tags:" - the right
 	// edge stays put so their On/Off buttons still line up with Reverse's
@@ -1702,6 +1710,10 @@ func main() {
 				drawDecksScreen()
 			case id == "reverse":
 				reverseMode = !reverseMode
+				saveDeckSettings()
+				drawDeckSettingsScreen()
+			case id == "tagmatch":
+				tagMatchAll = !tagMatchAll
 				saveDeckSettings()
 				drawDeckSettingsScreen()
 			case id == "prev" && tagPage > 0:
